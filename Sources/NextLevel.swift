@@ -2341,7 +2341,7 @@ extension NextLevel {
         if self._recording && (session.isAudioReady || self.captureMode == .videoWithoutAudio) && session.clipStarted {
             self.beginRecordingNewClipIfNecessary()
             
-            let minTimeBetweenFrames = 0.001
+            let minTimeBetweenFrames = 0.0001
             let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
             if sleepDuration > 0 {
                 Thread.sleep(forTimeInterval: sleepDuration)
