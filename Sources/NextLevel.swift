@@ -1974,6 +1974,9 @@ extension NextLevel {
     }
     
     internal func updateVideoOrientation() {
+        guard !isRecording else {
+            return
+        }
         if let session = self._recordingSession {
             if session.currentClipHasAudio == false && session.currentClipHasVideo == false {
                 session.reset()
