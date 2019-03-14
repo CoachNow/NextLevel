@@ -1945,14 +1945,40 @@ extension NextLevel {
         }
     }
     
-    public func isDeviceFormatSupported(frameRate: CMTimeScale, dimensions: CMVideoDimensions) -> Bool {
-        if let device: AVCaptureDevice = self._currentDevice,
+    public static func isDeviceFormatSupported(position: AVCaptureDevicePosition, frameRate: CMTimeScale, dimensions: CMVideoDimensions) -> Bool {
+        if let device: AVCaptureDevice = AVCaptureDevice.primaryVideoDevice(forPosition: position),
             let formats = device.formats as? [AVCaptureDeviceFormat] {
             for currentFormat in formats {
                 if currentFormat.isSupported(withFrameRate: frameRate, dimensions: dimensions) {
                     return true
                 }
             }
+        }
+        return false
+    }
+    
+    public static func isSloMoCaptureSupported() -> Bool {
+        var frameRate = CMTimeScale(240)
+        var dimensions = CMVideoDimensions(width: 1920, height: 1080)
+        
+        if NextLevel.isDeviceFormatSupported(position: .back, frameRate: frameRate, dimensions: dimensions) {
+            return true
+        }
+        
+        dimensions = CMVideoDimensions(width: 1280, height: 720)
+        if NextLevel.isDeviceFormatSupported(position: .back, frameRate: frameRate, dimensions: dimensions) {
+            return true
+        }
+        
+        frameRate = 120
+        dimensions = CMVideoDimensions(width: 1920, height: 1080)
+        if NextLevel.isDeviceFormatSupported(position: .back, frameRate: frameRate, dimensions: dimensions) {
+            return true
+        }
+        
+        dimensions = CMVideoDimensions(width: 1280, height: 720)
+        if NextLevel.isDeviceFormatSupported(position: .back, frameRate: frameRate, dimensions: dimensions) {
+            return true
         }
         return false
     }
