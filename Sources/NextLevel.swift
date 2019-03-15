@@ -1944,18 +1944,6 @@ extension NextLevel {
             }
         }
     }
-    
-    public func isDeviceFormatSupported(frameRate: CMTimeScale, dimensions: CMVideoDimensions) -> Bool {
-        if let device: AVCaptureDevice = self._currentDevice,
-            let formats = device.formats as? [AVCaptureDeviceFormat] {
-            for currentFormat in formats {
-                if currentFormat.isSupported(withFrameRate: frameRate, dimensions: dimensions) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
 }
 
 // MARK: - capture device switching
