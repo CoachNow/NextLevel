@@ -1273,6 +1273,9 @@ extension NextLevel {
     }
     
     internal func updateVideoOrientation() {
+        guard !isRecording else {
+            return
+        }
         if let session = self._recordingSession {
             if session.currentClipHasAudio == false && session.currentClipHasVideo == false {
                 session.reset()
@@ -1281,13 +1284,6 @@ extension NextLevel {
         
         var didChangeOrientation = false
         let currentOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
-        
-        if let previewConnection = self.previewLayer.connection {
-            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != currentOrientation {
-                previewConnection.videoOrientation = currentOrientation
-                didChangeOrientation = true
-            }
-        }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != currentOrientation {
@@ -2476,7 +2472,7 @@ extension NextLevel {
         if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
             self.beginRecordingNewClipIfNecessary()
             
-            let minTimeBetweenFrames = 0.004
+            let minTimeBetweenFrames = 0.0001
             let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
             if sleepDuration > 0 {
                 Thread.sleep(forTimeInterval: sleepDuration)
