@@ -303,6 +303,8 @@ public class NextLevel: NSObject {
     
     /// When `true` actives device orientation updates
     public var automaticallyUpdatesDeviceOrientation: Bool = false
+    public var automaticallyUpdatesPreviewOrientation: Bool = false
+
     
     /// The current orientation of the device.
     public var deviceOrientation: NextLevelDeviceOrientation = .portrait {
@@ -1284,6 +1286,13 @@ extension NextLevel {
         
         var didChangeOrientation = false
         let currentOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        
+        if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
+            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != currentOrientation {
+                previewConnection.videoOrientation = currentOrientation
+                didChangeOrientation = true
+            }
+        }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != currentOrientation {
