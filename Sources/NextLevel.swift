@@ -1274,6 +1274,19 @@ extension NextLevel {
         }
     }
     
+    public func changeToPrimaryVideoDeviceForCurrentPosition() throws {
+        let deviceForUse = AVCaptureDevice.primaryVideoDevice(forPosition: self.devicePosition)
+        if deviceForUse == nil {
+            throw NextLevelError.deviceNotAvailable
+        } else {
+            self.executeClosureAsyncOnSessionQueueIfNecessary {
+                self._requestedDevice = deviceForUse
+                self.configureSessionDevices()
+                self.updateVideoOrientation()
+            }
+        }
+    }
+    
     internal func updateVideoOrientation() {
         guard !isRecording else {
             return
