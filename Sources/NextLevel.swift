@@ -307,11 +307,26 @@ public class NextLevel: NSObject {
 
     
     /// The current orientation of the device.
-    public var deviceOrientation: NextLevelDeviceOrientation = .portrait {
-        didSet {
-            self.automaticallyUpdatesDeviceOrientation = false
-            self.updateVideoOrientation()
+    public lazy var deviceOrientation: NextLevelDeviceOrientation = {
+        var orientation: NextLevelDeviceOrientation
+        switch UIApplication.shared.statusBarOrientation {
+        case .portrait:
+            orientation = .portrait
+        case .portraitUpsideDown:
+            orientation = .portraitUpsideDown
+        case .landscapeLeft:
+            orientation = .landscapeLeft
+        case .landscapeRight:
+            orientation = .landscapeRight
+        default:
+            orientation = .portrait
         }
+        return orientation
+    }()
+    
+    public func setDeviceOrientationAndUpdateVideoOrientation(deviceOrientation: NextLevelDeviceOrientation) {
+        self.deviceOrientation = deviceOrientation
+        self.updateVideoOrientation()
     }
     
     // stabilization
@@ -1296,33 +1311,32 @@ extension NextLevel {
                 session.reset()
             }
         }
-        
         var didChangeOrientation = false
-        let currentOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        deviceOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
         
         if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
-            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != currentOrientation {
-                previewConnection.videoOrientation = currentOrientation
+            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != deviceOrientation {
+                previewConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
-            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != currentOrientation {
-                videoConnection.videoOrientation = currentOrientation
+            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
+                videoConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(with: AVMediaType.video) {
-            if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != currentOrientation {
-                photoConnection.videoOrientation = currentOrientation
+            if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != deviceOrientation {
+                photoConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if didChangeOrientation == true {
-            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: currentOrientation)
+            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: deviceOrientation)
         }
     }
     
