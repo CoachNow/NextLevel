@@ -1474,6 +1474,15 @@ extension NextLevel {
         }
     }
     
+    public var isTorchActive: Bool {
+        get {
+            if let device = self._currentDevice {
+                return device.isTorchActive
+            }
+            return false
+        }
+    }
+    
     /// Torch mode of the device.
     public var torchMode: NextLevelTorchMode {
         get {
