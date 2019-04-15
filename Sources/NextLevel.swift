@@ -308,6 +308,7 @@ public class NextLevel: NSObject {
     
     /// The current orientation of the device.
     public var deviceOrientation: NextLevelDeviceOrientation?
+    public var isTorchActive: Bool = false
     
     public func setDeviceOrientationAndUpdateVideoOrientation(deviceOrientation: NextLevelDeviceOrientation) {
         self.deviceOrientation = deviceOrientation
@@ -1469,15 +1470,6 @@ extension NextLevel {
         get {
             if let device = self._currentDevice {
                 return device.hasTorch
-            }
-            return false
-        }
-    }
-    
-    public var isTorchActive: Bool {
-        get {
-            if let device = self._currentDevice {
-                return device.isTorchActive
             }
             return false
         }
@@ -3186,6 +3178,7 @@ extension NextLevel {
             }
             
             DispatchQueue.main.async {
+                strongSelf.isTorchActive = currentDevice.isTorchActive
                 strongSelf.flashDelegate?.nextLevelTorchActiveChanged(strongSelf)
             }
         })
