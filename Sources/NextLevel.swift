@@ -232,6 +232,12 @@ public class NextLevel: NSObject {
     #endif
     public weak var portraitEffectsMatteDelegate: NextLevelPortraitEffectsMatteDelegate?
     public weak var metadataObjectsDelegate: NextLevelMetadataOutputObjectsDelegate?
+    
+    public var currentDevice: AVCaptureDevice? {
+        get {
+            return _currentDevice
+        }
+    }
 
     // preview
     
