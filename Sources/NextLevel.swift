@@ -1612,9 +1612,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest.
     public func focusExposeAndAdjustWhiteBalance(atAdjustedPoint adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1653,9 +1651,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest for focus
     public func focusAtAdjustedPointOfInterest(adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1732,8 +1728,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest for exposure.
     public func exposeAtAdjustedPointOfInterest(adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1760,8 +1755,7 @@ extension NextLevel {
     /// - Parameter durationPower: Larger power values will increase the sensitivity at shorter durations.
     /// - Parameter minDurationRangeLimit: Minimum limitation for duration.
     public func expose(withDuration duration: Double, durationPower: Double = 5, minDurationRangeLimit: Double = (1.0 / 1000.0)) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1789,8 +1783,7 @@ extension NextLevel {
     ///
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1812,8 +1805,7 @@ extension NextLevel {
     ///
     /// - Parameter targetBias: The exposure target bias.
     public func expose(withTargetBias targetBias: Float) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
