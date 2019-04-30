@@ -1757,12 +1757,17 @@ extension NextLevel {
             else {
                 return
         }
-        let newDuration = duration.clamped(to: device.activeFormat.minExposureDuration.seconds...device.activeFormat.maxExposureDuration.seconds)
+        var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
+        if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
+            durationTime = device.activeFormat.minExposureDuration
+        } else if (CMTimeCompare(durationTime, device.activeFormat.maxExposureDuration) > 0) {
+            durationTime = device.activeFormat.maxExposureDuration
+        }
         
         do {
             try device.lockForConfiguration()
             
-            device.setExposureModeCustom(duration:CMTime(seconds: newDuration, preferredTimescale: 1000*1000*1000), iso: AVCaptureDevice.currentISO, completionHandler: nil)
+            device.setExposureModeCustom(duration: durationTime, iso: AVCaptureDevice.currentISO, completionHandler: nil)
             
             device.unlockForConfiguration()
         } catch {
@@ -2596,7 +2601,7 @@ extension NextLevel {
             }
             
             // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-            session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { (success: Bool) -> Void in
+            session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 4800), completionHandler: { (success: Bool) -> Void in
                 // cleanup client rendering context
                 if self.isVideoCustomContextRenderingEnabled {
                     if let imageBuffer = imageBuffer {
@@ -2621,7 +2626,7 @@ extension NextLevel {
             if session.currentClipHasVideo == false && (session.currentClipHasAudio == false || self.captureMode == .videoWithoutAudio) {
                 if let audioBuffer = self._lastAudioFrame {
                     let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
-                    let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 600)
+                    let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 4800)
                     
                     if lastAudioEndTime > videoStartTime {
                         self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
