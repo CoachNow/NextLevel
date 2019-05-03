@@ -2969,11 +2969,11 @@ extension NextLevel: AVCaptureMetadataOutputObjectsDelegate {
 
 extension NextLevel {
     
-    internal func executeClosureAsyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
+    public func executeClosureAsyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
         self._sessionQueue.async(execute: closure)
     }
     
-    internal func executeClosureSyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
+    public func executeClosureSyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
         if DispatchQueue.getSpecific(key: NextLevelCaptureSessionQueueSpecificKey) != nil {
             closure()
         } else {
