@@ -458,6 +458,8 @@ public class NextLevel: NSObject {
     
     internal var _lastARFrame: CVPixelBuffer?
     
+    internal var _isCameraReady = false
+    
     // MARK: - singleton
     
     /// Method for providing a NextLevel singleton. This isn't required for use.
@@ -701,6 +703,7 @@ extension NextLevel {
             
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionDidStart(self)
+                self._isCameraReady = true
             }
         }
         #endif
@@ -2167,6 +2170,7 @@ extension NextLevel {
             
             if let format = updatedFormat {
                 do {
+                    self._isCameraReady = false
                     try device.lockForConfiguration()
                     device.activeFormat = format
                     if device.activeFormat.isSupported(withFrameRate: frameRate) {
@@ -2178,9 +2182,11 @@ extension NextLevel {
                     
                     DispatchQueue.main.async {
                         self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
+                        self._isCameraReady = true
                     }
                 } catch {
                     print("NextLevel, active device format failed to lock device for configuration")
+                    self._isCameraReady = true
                 }
             } else {
                 print("Nextlevel, could not find a current device format matching the requirements")
@@ -3033,12 +3039,14 @@ extension NextLevel {
         // TODO
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
+            self._isCameraReady = true
         }
     }
     
     @objc internal func handleSessionDidStopRunning(_ notification: Notification) {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStop(self)
+            self._isCameraReady = false
         }
     }
     
@@ -3063,6 +3071,7 @@ extension NextLevel {
         DispatchQueue.main.async {
             if self._recording {
                 self.delegate?.nextLevelSessionDidStop(self)
+                self._isCameraReady = false
             }
             
             DispatchQueue.main.async {
@@ -3109,8 +3118,14 @@ extension NextLevel {
     
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
-            self._sessionQueue.async {
-                self.updateVideoOrientation()
+            if self._isCameraReady {
+                self._sessionQueue.sync {
+                    self.updateVideoOrientation()
+                }
+            } else {
+                self._sessionQueue.async {
+                    self.updateVideoOrientation()
+                }
             }
         }
     }
