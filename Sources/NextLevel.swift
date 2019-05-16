@@ -288,6 +288,9 @@ public class NextLevel: NSObject {
                 self.updateVideoOrientation()
                 self._recordingSession?.fileType = self.captureMode == .movie ? .mov : .mp4
                 self._recordingSession?.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
+                if self.captureMode != .movie {
+                    self._movieFileOutput = nil
+                }
                 
                 #if USE_ARKIT
                 if self.captureMode == .arKit {
@@ -2699,7 +2702,16 @@ extension NextLevel {
     }
     
     private func checkSessionDuration() {
-        if let session = self._recordingSession,
+        if let movieFileOutput = self._movieFileOutput,
+            let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
+            captureMode == .movie {
+            if maximumCaptureDuration.isValid && movieFileOutput.recordedDuration >= maximumCaptureDuration {
+                self._recording = false
+                self.executeClosureAsyncOnSessionQueueIfNecessary {
+                    movieFileOutput.stopRecording()
+                }
+            }
+        } else if let session = self._recordingSession,
             let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration {
             if maximumCaptureDuration.isValid && session.totalDuration >= maximumCaptureDuration {
                 self._recording = false
@@ -2826,6 +2838,13 @@ extension NextLevel: AVCaptureFileOutputRecordingDelegate {
                 if let videoDelegate = self.videoDelegate {
                     DispatchQueue.main.async {
                         videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
+                    }
+                }
+                if let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
+                    let session = self._recordingSession,
+                    maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
+                    DispatchQueue.main.async {
+                        self.videoDelegate?.nextLevel(self, didCompleteSession: session)
                     }
                 }
             }
