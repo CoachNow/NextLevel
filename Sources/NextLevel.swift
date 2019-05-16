@@ -2829,23 +2829,25 @@ extension NextLevel: AVCaptureFileOutputRecordingDelegate {
     }
     
     public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        var clip: NextLevelClip? = nil
+        var success = true
+        if error != nil {
+            print("Movie file finishing error: \(String(describing: error))")
+            success = (((error! as NSError).userInfo[AVErrorRecordingSuccessfullyFinishedKey] as AnyObject).boolValue)!
+        }
         
-        if error == nil {
-            clip = NextLevelClip(url: outputFileURL, infoDict: nil)
-            if let clip = clip {
-                _recordingSession?.add(clip: clip)
-                if let videoDelegate = self.videoDelegate {
-                    DispatchQueue.main.async {
-                        videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
-                    }
+        if success {
+            let clip = NextLevelClip(url: outputFileURL, infoDict: nil)
+            _recordingSession?.add(clip: clip)
+            if let videoDelegate = self.videoDelegate {
+                DispatchQueue.main.async {
+                    videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
                 }
-                if let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
-                    let session = self._recordingSession,
-                    maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
-                    DispatchQueue.main.async {
-                        self.videoDelegate?.nextLevel(self, didCompleteSession: session)
-                    }
+            }
+            if let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
+                let session = self._recordingSession,
+                maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
+                DispatchQueue.main.async {
+                    self.videoDelegate?.nextLevel(self, didCompleteSession: session)
                 }
             }
         }
