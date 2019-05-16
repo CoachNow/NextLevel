@@ -274,7 +274,7 @@ public class NextLevel: NSObject {
     public var captureMode: NextLevelCaptureMode = .video {
         didSet {
             guard
-                self.captureMode != oldValue
+                self.captureMode != oldValue || self.captureMode == .movie
                 else {
                     return
             }
@@ -286,6 +286,8 @@ public class NextLevel: NSObject {
                 self.configureSessionDevices()
                 self.configureMetadataObjects()
                 self.updateVideoOrientation()
+                self._recordingSession?.fileType = self.captureMode == .movie ? .mov : .mp4
+                self._recordingSession?.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
                 
                 #if USE_ARKIT
                 if self.captureMode == .arKit {
@@ -672,7 +674,7 @@ extension NextLevel {
         #if USE_ARKIT
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             guard let config = self.arConfiguration?.config,
-                  let options = self.arConfiguration?.runOptions else {
+                let options = self.arConfiguration?.runOptions else {
                     return
             }
             
@@ -762,7 +764,8 @@ extension NextLevel {
             shouldConfigureVideo = true
             break
         case .movie:
-            // TODO
+            shouldConfigureVideo = true
+            shouldConfigureAudio = true
             break
         case .arKit:
             shouldConfigureVideo = true
@@ -882,7 +885,10 @@ extension NextLevel {
             let _ = self.addAudioOuput()
             break
         case .movie:
-            // TODO
+            if self.previewLayer.connection != nil {
+                let _ = self.addAudioOuput()
+                let _ = self.addMovieOutput()
+            }
             break
         case .arKit:
             // no AV inputs to setup
@@ -1095,26 +1101,35 @@ extension NextLevel {
         if self._movieFileOutput == nil {
             self._movieFileOutput = AVCaptureMovieFileOutput()
         }
-        
-        // TODO configuration
-        guard let movieFileOutputConnection = self._movieFileOutput?.connection(with: .video) else {
-            self._movieFileOutput = nil
-            return false
-        }
-        initiateDeviceOrientationIfNeeded()
-        
-        movieFileOutputConnection.videoOrientation = self.deviceOrientation!
-        
-        var videoSettings: [String: Any] = [:]
-        if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
-            availableVideoCodecTypes.contains(self.videoConfiguration.codec) {
-            videoSettings[AVVideoCodecKey] = self.videoConfiguration.codec
-        }
-        self._movieFileOutput?.setOutputSettings(videoSettings, for: movieFileOutputConnection)
-        
         if let session = self._captureSession, let movieOutput = self._movieFileOutput {
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
+                guard let movieFileOutputConnection = movieOutput.connection(with: .video) else {
+                    self._movieFileOutput = nil
+                    print("NextLevel, couldn't add movie output to session")
+                    return false
+                }
+                if session.sessionPreset != self.videoConfiguration.preset {
+                    if session.canSetSessionPreset(self.videoConfiguration.preset) {
+                        session.sessionPreset = self.videoConfiguration.preset
+                    } else {
+                        print("NextLevel, could not set preset on session")
+                    }
+                }
+                if movieFileOutputConnection.isVideoStabilizationSupported {
+                    movieFileOutputConnection.preferredVideoStabilizationMode = .auto
+                }
+                
+                initiateDeviceOrientationIfNeeded()
+                
+                movieFileOutputConnection.videoOrientation = self.deviceOrientation!
+                
+                var videoSettings: [String: Any] = [:]
+                if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
+                    availableVideoCodecTypes.contains(self.videoConfiguration.codec) {
+                    videoSettings[AVVideoCodecKey] = self.videoConfiguration.codec
+                }
+                self._movieFileOutput?.setOutputSettings(videoSettings, for: movieFileOutputConnection)
                 return true
             }
         }
@@ -1325,8 +1340,6 @@ extension NextLevel {
             }
         }
         var didChangeOrientation = false
-        
-        initiateDeviceOrientationIfNeeded()
         deviceOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
         
         if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
@@ -2407,24 +2420,31 @@ extension NextLevel {
         
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             if let session = self._recordingSession {
-                if session.currentClipHasStarted {
-                    session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
-                        if let sessionClip = sessionClip {
-                            DispatchQueue.main.async {
-                                self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
+                if self.captureMode == .movie {
+                    self._movieFileOutput?.stopRecording()
+                    if let completionHandler = completionHandler {
+                        DispatchQueue.main.async(execute: completionHandler)
+                    }
+                } else {
+                    if session.currentClipHasStarted {
+                        session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
+                            if let sessionClip = sessionClip {
+                                DispatchQueue.main.async {
+                                    self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
+                                }
+                                if let completionHandler = completionHandler {
+                                    DispatchQueue.main.async(execute: completionHandler)
+                                }
+                            } else if let _ = error {
+                                // TODO, report error
+                                if let completionHandler = completionHandler {
+                                    DispatchQueue.main.async(execute: completionHandler)
+                                }
                             }
-                            if let completionHandler = completionHandler {
-                                DispatchQueue.main.async(execute: completionHandler)
-                            }
-                        } else if let _ = error {
-                            // TODO, report error
-                            if let completionHandler = completionHandler {
-                                DispatchQueue.main.async(execute: completionHandler)
-                            }
-                        }
-                    })
-                } else if let completionHandler = completionHandler {
-                    DispatchQueue.main.async(execute: completionHandler)
+                        })
+                    } else if let completionHandler = completionHandler {
+                        DispatchQueue.main.async(execute: completionHandler)
+                    }
                 }
             } else if let completionHandler = completionHandler {
                 DispatchQueue.main.async(execute: completionHandler)
@@ -2435,7 +2455,11 @@ extension NextLevel {
     internal func beginRecordingNewClipIfNecessary() {
         if let session = self._recordingSession,
             session.isReady == false {
-            session.beginClip()
+            if captureMode == .movie {
+                _movieFileOutput?.startRecording(to: session.url!, recordingDelegate: self)
+            } else {
+                session.beginClip()
+            }
             DispatchQueue.main.async {
                 self.videoDelegate?.nextLevel(self, didStartClipInSession: session)
             }
@@ -2589,7 +2613,7 @@ extension NextLevel {
         if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
             self.beginRecordingNewClipIfNecessary()
             
-            let minTimeBetweenFrames = 0.004
+            let minTimeBetweenFrames = 0.0001
             let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
             if sleepDuration > 0 {
                 Thread.sleep(forTimeInterval: sleepDuration)
@@ -2738,9 +2762,9 @@ extension NextLevel {
         // TODO: doesn't properly support orientation, should reference videoConfiguration settings
         let pixelBufferAttributes: [String:AnyObject] = [String(kCVPixelBufferPixelFormatTypeKey) : NSNumber(integerLiteral: Int(self._bufferFormatType)),
                                                          String(kCVPixelBufferWidthKey) : NSNumber(value: self._bufferHeight), // flip
-                                                         String(kCVPixelBufferHeightKey) : NSNumber(value: self._bufferWidth), // flip
-                                                         String(kCVPixelBufferMetalCompatibilityKey) : NSNumber(booleanLiteral: true),
-                                                         String(kCVPixelBufferIOSurfacePropertiesKey) : [:] as AnyObject ]
+            String(kCVPixelBufferHeightKey) : NSNumber(value: self._bufferWidth), // flip
+            String(kCVPixelBufferMetalCompatibilityKey) : NSNumber(booleanLiteral: true),
+            String(kCVPixelBufferIOSurfacePropertiesKey) : [:] as AnyObject ]
         
         var pixelBufferPool: CVPixelBufferPool? = nil
         if CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes as CFDictionary, pixelBufferAttributes as CFDictionary, &pixelBufferPool) == kCVReturnSuccess {
@@ -2793,6 +2817,19 @@ extension NextLevel: AVCaptureFileOutputRecordingDelegate {
     }
     
     public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
+        var clip: NextLevelClip? = nil
+        
+        if error == nil {
+            clip = NextLevelClip(url: outputFileURL, infoDict: nil)
+            if let clip = clip {
+                _recordingSession?.add(clip: clip)
+                if let videoDelegate = self.videoDelegate {
+                    DispatchQueue.main.async {
+                        videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
+                    }
+                }
+            }
+        }
     }
     
 }
@@ -3037,6 +3074,9 @@ extension NextLevel {
     @objc internal func handleSessionDidStartRunning(_ notification: Notification) {
         //self.performRecoveryCheckIfNecessary()
         // TODO
+        if captureMode == .movie {
+            captureMode = .movie
+        }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
             self._isCameraReady = true
