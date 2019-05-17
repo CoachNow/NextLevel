@@ -3102,8 +3102,8 @@ extension NextLevel {
     @objc internal func handleSessionDidStartRunning(_ notification: Notification) {
         //self.performRecoveryCheckIfNecessary()
         // TODO
-        if captureMode == .movie && _movieFileOutput == nil {
-            _ = addMovieOutput()
+        if captureMode == .movie && (_movieFileOutput == nil || _movieFileOutput!.connection(with: .video) == nil) {
+            _ = self.addMovieOutput()
         }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
