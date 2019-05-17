@@ -463,7 +463,8 @@ public class NextLevel: NSObject {
     
     internal var _lastARFrame: CVPixelBuffer?
     
-    @objc internal var _isReadyForSynchronousOrientationUpdates = false
+    internal var _isReadyForSynchronousOrientationUpdates = false
+    @objc internal var _wasBackgrounded = false
     
     // MARK: - singleton
     
@@ -3062,10 +3063,11 @@ extension NextLevel {
     }
     
     @objc internal func handleApplicationWillEnterForeground(_ notification: Notification) {
-        //self.sessionQueue.async {}
+        self.perform(#selector(setter: _wasBackgrounded), with: false, afterDelay: 1)
     }
     
     @objc internal func handleApplicationDidEnterBackground(_ notification: Notification) {
+        _wasBackgrounded = true
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             if self.isRecording {
                 self.pause()
@@ -3178,7 +3180,7 @@ extension NextLevel {
     
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
-            if self._isReadyForSynchronousOrientationUpdates {
+            if self._isReadyForSynchronousOrientationUpdates && !self._wasBackgrounded {
                 self._sessionQueue.sync {
                     self.updateVideoOrientation()
                 }
