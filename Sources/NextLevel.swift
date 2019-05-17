@@ -274,7 +274,7 @@ public class NextLevel: NSObject {
     public var captureMode: NextLevelCaptureMode = .video {
         didSet {
             guard
-                self.captureMode != oldValue || self.captureMode == .movie
+                self.captureMode != oldValue
                 else {
                     return
             }
@@ -463,7 +463,7 @@ public class NextLevel: NSObject {
     
     internal var _lastARFrame: CVPixelBuffer?
     
-    internal var _isCameraReady = false
+    @objc internal var _isReadyForSynchronousOrientationUpdates = false
     
     // MARK: - singleton
     
@@ -888,8 +888,8 @@ extension NextLevel {
             let _ = self.addAudioOuput()
             break
         case .movie:
+            let _ = self.addAudioOuput()
             if self.previewLayer.connection != nil {
-                let _ = self.addAudioOuput()
                 let _ = self.addMovieOutput()
             }
             break
@@ -1353,6 +1353,13 @@ extension NextLevel {
         }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
+                videoConnection.videoOrientation = deviceOrientation!
+                didChangeOrientation = true
+            }
+        }
+        
+        if let movieOutput = self._movieFileOutput, let videoConnection = movieOutput.connection(with: .video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
                 videoConnection.videoOrientation = deviceOrientation!
                 didChangeOrientation = true
@@ -2186,7 +2193,7 @@ extension NextLevel {
             
             if let format = updatedFormat {
                 do {
-                    self._isCameraReady = false
+                    self._isReadyForSynchronousOrientationUpdates = false
                     try device.lockForConfiguration()
                     device.activeFormat = format
                     if device.activeFormat.isSupported(withFrameRate: frameRate) {
@@ -2198,11 +2205,11 @@ extension NextLevel {
                     
                     DispatchQueue.main.async {
                         self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
-                        self._isCameraReady = true
+                        self._isReadyForSynchronousOrientationUpdates = true
                     }
                 } catch {
                     print("NextLevel, active device format failed to lock device for configuration")
-                    self._isCameraReady = true
+                    self._isReadyForSynchronousOrientationUpdates = true
                 }
             } else {
                 print("Nextlevel, could not find a current device format matching the requirements")
@@ -3095,19 +3102,19 @@ extension NextLevel {
     @objc internal func handleSessionDidStartRunning(_ notification: Notification) {
         //self.performRecoveryCheckIfNecessary()
         // TODO
-        if captureMode == .movie {
-            captureMode = .movie
+        if captureMode == .movie && _movieFileOutput == nil {
+            _ = addMovieOutput()
         }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
-            self._isCameraReady = true
+            self._isReadyForSynchronousOrientationUpdates = true
         }
     }
     
     @objc internal func handleSessionDidStopRunning(_ notification: Notification) {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStop(self)
-            self._isCameraReady = false
+            self._isReadyForSynchronousOrientationUpdates = false
         }
     }
     
@@ -3132,7 +3139,7 @@ extension NextLevel {
         DispatchQueue.main.async {
             if self._recording {
                 self.delegate?.nextLevelSessionDidStop(self)
-                self._isCameraReady = false
+                self._isReadyForSynchronousOrientationUpdates = false
             }
             
             DispatchQueue.main.async {
@@ -3179,7 +3186,7 @@ extension NextLevel {
     
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
-            if self._isCameraReady {
+            if self._isReadyForSynchronousOrientationUpdates {
                 self._sessionQueue.sync {
                     self.updateVideoOrientation()
                 }
