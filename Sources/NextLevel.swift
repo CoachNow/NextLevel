@@ -286,8 +286,6 @@ public class NextLevel: NSObject {
                 self.configureSessionDevices()
                 self.configureMetadataObjects()
                 self.updateVideoOrientation()
-                self._recordingSession?.fileType = self.captureMode == .movie ? .mov : .mp4
-                self._recordingSession?.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
                 if self.captureMode != .movie {
                     self._movieFileOutput = nil
                 }
@@ -648,6 +646,8 @@ extension NextLevel {
             
             // setup NL recording session
             self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+            self._recordingSession!.fileType = self.captureMode == .movie ? .mov : .mp4
+            self._recordingSession!.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
             
             if let session = self._captureSession {
                 session.automaticallyConfiguresApplicationAudioSession = self.automaticallyConfiguresApplicationAudioSession
@@ -690,6 +690,8 @@ extension NextLevel {
             // setup NL recording session
             if self._recordingSession == nil {
                 self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+                self._recordingSession!.fileType = .mp4
+                self._recordingSession!.fileExtension = "mp4"
                 self.arConfiguration?.session?.delegateQueue = self._sessionQueue
             }
             
