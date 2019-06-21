@@ -326,7 +326,18 @@ public class NextLevel: NSObject {
     
     public func initiateDeviceOrientationIfNeeded() {
         if deviceOrientation == nil {
-            deviceOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+            switch UIApplication.shared.statusBarOrientation {
+            case .portrait:
+                deviceOrientation = .portrait
+            case .portraitUpsideDown:
+                deviceOrientation = .portraitUpsideDown
+            case .landscapeLeft:
+                deviceOrientation = .landscapeLeft
+            case .landscapeRight:
+                deviceOrientation = .landscapeRight
+            default:
+                deviceOrientation = .portrait
+            }
         }
     }
     
