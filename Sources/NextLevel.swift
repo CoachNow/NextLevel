@@ -701,7 +701,6 @@ extension NextLevel {
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionDidStart(self)
                 self._isCameraReady = true
-                self.deviceOrientationDidChange(nil)
             }
         }
         #endif
@@ -3097,7 +3096,6 @@ extension NextLevel {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
             self._isReadyForSynchronousOrientationUpdates = true
-            self.deviceOrientationDidChange(nil)
         }
     }
     
@@ -3174,7 +3172,7 @@ extension NextLevel {
         }
     }
     
-    @objc internal func deviceOrientationDidChange(_ notification: NSNotification?) {
+    @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
             if self._isReadyForSynchronousOrientationUpdates && !self._wasBackgrounded {
                 self._sessionQueue.sync {
