@@ -315,14 +315,32 @@ public class NextLevel: NSObject {
     
     /// When `true` actives device orientation updates
     public var automaticallyUpdatesDeviceOrientation: Bool = false
+    public var automaticallyUpdatesPreviewOrientation: Bool = false
     
     /// The current orientation of the device.
-    public var deviceOrientation: NextLevelDeviceOrientation = .portrait {
-        didSet {
-            self.automaticallyUpdatesDeviceOrientation = false
-            self.updateVideoOrientation()
-        }
+    public var deviceOrientation: NextLevelDeviceOrientation?
+        
+    public func setDeviceOrientationAndUpdateVideoOrientation(deviceOrientation: NextLevelDeviceOrientation) {
+        self.deviceOrientation = deviceOrientation
+        updateVideoOrientation()
     }
+    
+    public func initiateDeviceOrientationIfNeeded() {
+            if deviceOrientation == nil {
+                switch UIApplication.shared.statusBarOrientation {
+                case .portrait:
+                    deviceOrientation = .portrait
+                case .portraitUpsideDown:
+                    deviceOrientation = .portraitUpsideDown
+                case .landscapeLeft:
+                    deviceOrientation = .landscapeLeft
+                case .landscapeRight:
+                    deviceOrientation = .landscapeRight
+                default:
+                    deviceOrientation = .portrait
+                }
+            }
+        }
     
     // stabilization
     
@@ -591,7 +609,7 @@ extension NextLevel {
         guard self.authorizationStatusForCurrentCaptureMode() == .authorized else {
             throw NextLevelError.authorization
         }
-        
+        initiateDeviceOrientationIfNeeded()
         if self.captureMode == .arKit {
             #if USE_ARKIT
             if #available(iOS 11.0, *) {
@@ -1110,7 +1128,9 @@ extension NextLevel {
             return false
         }
         
-        movieFileOutputConnection.videoOrientation = self.deviceOrientation
+        initiateDeviceOrientationIfNeeded()
+        
+        movieFileOutputConnection.videoOrientation = self.deviceOrientation!
         
         var videoSettings: [String: Any] = [:]
         if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
@@ -1330,7 +1350,13 @@ extension NextLevel {
         }
     }
     
+    
+    
     internal func updateVideoOrientation() {
+        guard !isRecording else {
+            return
+        }
+        
         if let session = self._recordingSession {
             if session.currentClipHasAudio == false && session.currentClipHasVideo == false {
                 session.reset()
@@ -1338,31 +1364,31 @@ extension NextLevel {
         }
         
         var didChangeOrientation = false
-        let currentOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        deviceOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
         
-        if let previewConnection = self.previewLayer.connection {
-            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != currentOrientation {
-                previewConnection.videoOrientation = currentOrientation
+        if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
+            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != deviceOrientation {
+                previewConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
-            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != currentOrientation {
-                videoConnection.videoOrientation = currentOrientation
+            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
+                videoConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(with: AVMediaType.video) {
-            if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != currentOrientation {
-                photoConnection.videoOrientation = currentOrientation
+            if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != deviceOrientation {
+                photoConnection.videoOrientation = deviceOrientation
                 didChangeOrientation = true
             }
         }
         
         if didChangeOrientation == true {
-            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: currentOrientation)
+            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: deviceOrientation)
         }
     }
     
@@ -2528,7 +2554,7 @@ extension NextLevel {
         if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
             self.beginRecordingNewClipIfNecessary()
             
-            let minTimeBetweenFrames = 0.004
+            let minTimeBetweenFrames = 0.0001
             let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
             if sleepDuration > 0 {
                 Thread.sleep(forTimeInterval: sleepDuration)
