@@ -251,6 +251,11 @@ public class NextLevel: NSObject {
     public weak var portraitEffectsMatteDelegate: NextLevelPortraitEffectsMatteDelegate?
     public weak var metadataObjectsDelegate: NextLevelMetadataOutputObjectsDelegate?
 
+    public var currentDevice: AVCaptureDevice? {
+         get {
+             return _currentDevice
+         }
+    }
     // preview
     
     /// Live camera preview, add as a sublayer to the UIView's primary layer.
@@ -298,6 +303,9 @@ public class NextLevel: NSObject {
                 self.configureSessionDevices()
                 self.configureMetadataObjects()
                 self.updateVideoOrientation()
+                if self.captureMode != .movie {
+                    self._movieFileOutput = nil
+                }
                 self.delegate?.nextLevelCaptureModeDidChange(self)
             }
         }
@@ -319,6 +327,7 @@ public class NextLevel: NSObject {
     
     /// The current orientation of the device.
     public var deviceOrientation: NextLevelDeviceOrientation?
+    public var isTorchActive: Bool = false
         
     public func setDeviceOrientationAndUpdateVideoOrientation(deviceOrientation: NextLevelDeviceOrientation) {
         self.deviceOrientation = deviceOrientation
@@ -473,6 +482,8 @@ public class NextLevel: NSObject {
     
     internal var _lastARFrame: CVPixelBuffer?
     
+    internal var _isReadyForSynchronousOrientationUpdates = false
+    @objc internal var _wasBackgrounded = false
     // MARK: - singleton
     
     /// Method for providing a NextLevel singleton. This isn't required for use.
@@ -665,6 +676,8 @@ extension NextLevel {
             
             // setup NL recording session
             self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+            self._recordingSession!.fileType = self.captureMode == .movie ? .mov : .mp4
+            self._recordingSession!.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
             
             if let session = self._captureSession {
                 session.automaticallyConfiguresApplicationAudioSession = self.automaticallyConfiguresApplicationAudioSession
@@ -707,6 +720,8 @@ extension NextLevel {
             // setup NL recording session
             if self._recordingSession == nil {
                 self._recordingSession = NextLevelSession(queue: self._sessionQueue, queueKey: NextLevelCaptureSessionQueueSpecificKey)
+                self._recordingSession!.fileType = self.captureMode == .movie ? .mov : .mp4
+                self._recordingSession!.fileExtension = self.captureMode == .movie ? "mov" : "mp4"
                 self.arConfiguration?.session?.delegateQueue = self._sessionQueue
             }
             
@@ -726,6 +741,7 @@ extension NextLevel {
             
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionDidStart(self)
+                self._isCameraReady = true
             }
         }
         #endif
@@ -784,7 +800,8 @@ extension NextLevel {
             shouldConfigureVideo = true
             break
         case .movie:
-            // TODO
+            shouldConfigureVideo = true
+            shouldConfigureAudio = true
             break
         case .arKit:
             shouldConfigureVideo = true
@@ -904,7 +921,10 @@ extension NextLevel {
             let _ = self.addAudioOuput()
             break
         case .movie:
-            // TODO
+            let _ = self.addAudioOuput()
+            if self.previewLayer.connection != nil {
+               let _ = self.addMovieOutput()
+            }
             break
         case .arKit:
             // no AV inputs to setup
@@ -1122,26 +1142,35 @@ extension NextLevel {
             self._movieFileOutput = AVCaptureMovieFileOutput()
         }
         
-        // TODO configuration
-        guard let movieFileOutputConnection = self._movieFileOutput?.connection(with: .video) else {
-            self._movieFileOutput = nil
-            return false
-        }
-        
-        initiateDeviceOrientationIfNeeded()
-        
-        movieFileOutputConnection.videoOrientation = self.deviceOrientation!
-        
-        var videoSettings: [String: Any] = [:]
-        if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
-            availableVideoCodecTypes.contains(self.videoConfiguration.codec) {
-            videoSettings[AVVideoCodecKey] = self.videoConfiguration.codec
-        }
-        self._movieFileOutput?.setOutputSettings(videoSettings, for: movieFileOutputConnection)
-        
         if let session = self._captureSession, let movieOutput = self._movieFileOutput {
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
+                guard let movieFileOutputConnection = movieOutput.connection(with: .video) else {
+                    self._movieFileOutput = nil
+                    print("NextLevel, couldn't add movie output to session")
+                    return false
+                }
+                if session.sessionPreset != self.videoConfiguration.preset {
+                    if session.canSetSessionPreset(self.videoConfiguration.preset) {
+                        session.sessionPreset = self.videoConfiguration.preset
+                    } else {
+                        print("NextLevel, could not set preset on session")
+                    }
+                }
+                if movieFileOutputConnection.isVideoStabilizationSupported {
+                    movieFileOutputConnection.preferredVideoStabilizationMode = .auto
+                }
+
+                initiateDeviceOrientationIfNeeded()
+
+                movieFileOutputConnection.videoOrientation = self.deviceOrientation!
+
+                var videoSettings: [String: Any] = [:]
+                    if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
+                       availableVideoCodecTypes.contains(self.videoConfiguration.codec) {
+                       videoSettings[AVVideoCodecKey] = self.videoConfiguration.codec
+                 }
+                self._movieFileOutput?.setOutputSettings(videoSettings, for: movieFileOutputConnection)
                 return true
             }
         }
@@ -1350,7 +1379,18 @@ extension NextLevel {
         }
     }
     
-    
+    public func changeToPrimaryVideoDeviceForCurrentPosition() throws {
+        let deviceForUse = AVCaptureDevice.primaryVideoDevice(forPosition: self.devicePosition)
+        if deviceForUse == nil {
+            throw NextLevelError.deviceNotAvailable
+        } else {
+            self.executeClosureAsyncOnSessionQueueIfNecessary {
+                self._requestedDevice = deviceForUse
+                self.configureSessionDevices()
+                self.updateVideoOrientation()
+            }
+        }
+    }
     
     internal func updateVideoOrientation() {
         guard !isRecording else {
@@ -1368,21 +1408,28 @@ extension NextLevel {
         
         if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
             if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != deviceOrientation {
-                previewConnection.videoOrientation = deviceOrientation
+                previewConnection.videoOrientation = deviceOrientation!
                 didChangeOrientation = true
             }
         }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
-                videoConnection.videoOrientation = deviceOrientation
+                videoConnection.videoOrientation = deviceOrientation!
+                didChangeOrientation = true
+            }
+        }
+        
+        if let movieOutput = self._movieFileOutput, let videoConnection = movieOutput.connection(with: .video) {
+            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
+                videoConnection.videoOrientation = deviceOrientation!
                 didChangeOrientation = true
             }
         }
         
         if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(with: AVMediaType.video) {
             if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != deviceOrientation {
-                photoConnection.videoOrientation = deviceOrientation
+                photoConnection.videoOrientation = deviceOrientation!
                 didChangeOrientation = true
             }
         }
@@ -1652,9 +1699,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest.
     public func focusExposeAndAdjustWhiteBalance(atAdjustedPoint adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1693,9 +1738,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest for focus
     public func focusAtAdjustedPointOfInterest(adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1772,8 +1815,7 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest for exposure.
     public func exposeAtAdjustedPointOfInterest(adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1797,27 +1839,22 @@ extension NextLevel {
     /// Adjusts exposure duration to a custom value in seconds.
     ///
     /// - Parameter duration: The exposure duration in seconds.
-    /// - Parameter durationPower: Larger power values will increase the sensitivity at shorter durations.
-    /// - Parameter minDurationRangeLimit: Minimum limitation for duration.
-    public func expose(withDuration duration: Double, durationPower: Double = 5, minDurationRangeLimit: Double = (1.0 / 1000.0)) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+    public func expose(withDuration duration: Double) {
+        guard let device = self._currentDevice
             else {
                 return
         }
-        
-        let newDuration = duration.clamped(to: 0...1)
-        
-        let minDurationSeconds: Double = Swift.max(CMTimeGetSeconds(device.activeFormat.minExposureDuration), minDurationRangeLimit)
-        let maxDurationSeconds: Double = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
-        
-        let p: Double = pow(newDuration, durationPower)
-        let newDurationSeconds: Double = (p * ( maxDurationSeconds - minDurationSeconds ) + minDurationSeconds)
+        var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
+        if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
+            durationTime = device.activeFormat.minExposureDuration
+        } else if (CMTimeCompare(durationTime, device.activeFormat.maxExposureDuration) > 0) {
+            durationTime = device.activeFormat.maxExposureDuration
+        }
         
         do {
             try device.lockForConfiguration()
             
-            device.setExposureModeCustom(duration: CMTimeMakeWithSeconds( newDurationSeconds, preferredTimescale: 1000*1000*1000 ), iso: AVCaptureDevice.currentISO, completionHandler: nil)
+            device.setExposureModeCustom(duration: durationTime, iso: AVCaptureDevice.currentISO, completionHandler: nil)
             
             device.unlockForConfiguration()
         } catch {
@@ -1829,8 +1866,7 @@ extension NextLevel {
     ///
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -1852,8 +1888,7 @@ extension NextLevel {
     ///
     /// - Parameter targetBias: The exposure target bias.
     public func expose(withTargetBias targetBias: Float) {
-        guard let device = self._currentDevice,
-            !device.isAdjustingExposure
+        guard let device = self._currentDevice
             else {
                 return
         }
@@ -2219,6 +2254,7 @@ extension NextLevel {
             
             if let format = updatedFormat {
                 do {
+                    self._isReadyForSynchronousOrientationUpdates = false
                     try device.lockForConfiguration()
                     device.activeFormat = format
                     if device.activeFormat.isSupported(withFrameRate: frameRate) {
@@ -2230,9 +2266,11 @@ extension NextLevel {
                     
                     DispatchQueue.main.async {
                         self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
+                        self._isReadyForSynchronousOrientationUpdates = true
                     }
                 } catch {
                     print("NextLevel, active device format failed to lock device for configuration")
+                    self._isReadyForSynchronousOrientationUpdates = true
                 }
             } else {
                 print("Nextlevel, could not find a current device format matching the requirements")
@@ -2447,24 +2485,31 @@ extension NextLevel {
         
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             if let session = self._recordingSession {
-                if session.currentClipHasStarted {
-                    session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
-                        if let sessionClip = sessionClip {
-                            DispatchQueue.main.async {
-                                self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
+                if self.captureMode == .movie {
+                    self._movieFileOutput?.stopRecording()
+                    if let completionHandler = completionHandler {
+                        DispatchQueue.main.async(execute: completionHandler)
+                    }
+                }else {
+                    if session.currentClipHasStarted {
+                        session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
+                            if let sessionClip = sessionClip {
+                                DispatchQueue.main.async {
+                                    self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
+                                }
+                                if let completionHandler = completionHandler {
+                                    DispatchQueue.main.async(execute: completionHandler)
+                                }
+                            } else if let _ = error {
+                                // TODO, report error
+                                if let completionHandler = completionHandler {
+                                    DispatchQueue.main.async(execute: completionHandler)
+                                }
                             }
-                            if let completionHandler = completionHandler {
-                                DispatchQueue.main.async(execute: completionHandler)
-                            }
-                        } else if let _ = error {
-                            // TODO, report error
-                            if let completionHandler = completionHandler {
-                                DispatchQueue.main.async(execute: completionHandler)
-                            }
-                        }
-                    })
-                } else if let completionHandler = completionHandler {
-                    DispatchQueue.main.async(execute: completionHandler)
+                        })
+                    } else if let completionHandler = completionHandler {
+                        DispatchQueue.main.async(execute: completionHandler)
+                    }
                 }
             } else if let completionHandler = completionHandler {
                 DispatchQueue.main.async(execute: completionHandler)
@@ -2475,7 +2520,11 @@ extension NextLevel {
     internal func beginRecordingNewClipIfNecessary() {
         if let session = self._recordingSession,
             session.isReady == false {
-            session.beginClip()
+            if captureMode == .movie {
+                _movieFileOutput?.startRecording(to: session.url!, recordingDelegate: self)
+            } else {
+                session.beginClip()
+            }
             DispatchQueue.main.async {
                 self.videoDelegate?.nextLevel(self, didStartClipInSession: session)
             }
@@ -2629,7 +2678,7 @@ extension NextLevel {
         if self._recording && (session.isAudioSetup || self.captureMode == .videoWithoutAudio) && session.currentClipHasStarted {
             self.beginRecordingNewClipIfNecessary()
             
-            let minTimeBetweenFrames = 0.004
+            let minTimeBetweenFrames = 0.0001
             let sleepDuration = minTimeBetweenFrames - (CACurrentMediaTime() - self._lastVideoFrameTimeInterval)
             if sleepDuration > 0 {
                 Thread.sleep(forTimeInterval: sleepDuration)
@@ -2647,7 +2696,7 @@ extension NextLevel {
             }
             
             // when clients modify a frame using their rendering context, the resulting CVPixelBuffer is then passed in here with the original sampleBuffer for recording
-            session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 600), completionHandler: { (success: Bool) -> Void in
+            session.appendVideo(withPixelBuffer: pixelBuffer, customImageBuffer: self._sessionVideoCustomContextImageBuffer, timestamp: timestamp, minFrameDuration: CMTime(seconds: 1, preferredTimescale: 4800), completionHandler: { (success: Bool) -> Void in
                 // cleanup client rendering context
                 if self.isVideoCustomContextRenderingEnabled {
                     if let imageBuffer = imageBuffer {
@@ -2672,7 +2721,7 @@ extension NextLevel {
             if session.currentClipHasVideo == false && (session.currentClipHasAudio == false || self.captureMode == .videoWithoutAudio) {
                 if let audioBuffer = self._lastAudioFrame {
                     let lastAudioEndTime = CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(audioBuffer), CMSampleBufferGetDuration(audioBuffer))
-                    let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 600)
+                    let videoStartTime = CMTime(seconds: timestamp, preferredTimescale: 4800)
                     
                     if lastAudioEndTime > videoStartTime {
                         self.handleAudioOutput(sampleBuffer: audioBuffer, session: session)
@@ -2715,7 +2764,16 @@ extension NextLevel {
     }
     
     private func checkSessionDuration() {
-        if let session = self._recordingSession,
+        if let movieFileOutput = self._movieFileOutput,
+                let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
+                captureMode == .movie {
+                if maximumCaptureDuration.isValid && movieFileOutput.recordedDuration >= maximumCaptureDuration {
+                    self._recording = false
+                    self.executeClosureAsyncOnSessionQueueIfNecessary {
+                        movieFileOutput.stopRecording()
+                    }
+                }
+        } else if let session = self._recordingSession,
             let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration {
             if maximumCaptureDuration.isValid && session.totalDuration >= maximumCaptureDuration {
                 self._recording = false
@@ -2783,6 +2841,20 @@ extension NextLevel: AVCaptureFileOutputRecordingDelegate {
     }
     
     public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
+        let clip = NextLevelClip(url: outputFileURL, infoDict: nil)
+            _recordingSession?.add(clip: clip)
+            if let videoDelegate = self.videoDelegate {
+                DispatchQueue.main.async {
+                    videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
+                }
+            }
+            if let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
+                let session = self._recordingSession,
+                maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
+                DispatchQueue.main.async {
+                    self.videoDelegate?.nextLevel(self, didCompleteSession: session)
+                }
+            }
     }
     
 }
@@ -2957,11 +3029,11 @@ extension NextLevel: AVCaptureMetadataOutputObjectsDelegate {
 
 extension NextLevel {
     
-    internal func executeClosureAsyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
+    public func executeClosureAsyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
         self._sessionQueue.async(execute: closure)
     }
     
-    internal func executeClosureSyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
+    public func executeClosureSyncOnSessionQueueIfNecessary(withClosure closure: @escaping () -> Void) {
         if DispatchQueue.getSpecific(key: NextLevelCaptureSessionQueueSpecificKey) != nil {
             closure()
         } else {
@@ -2987,10 +3059,11 @@ extension NextLevel {
     }
     
     @objc internal func handleApplicationWillEnterForeground(_ notification: Notification) {
-        //self.sessionQueue.async {}
+        self.perform(#selector(setter: _wasBackgrounded), with: false, afterDelay: 1)
     }
     
     @objc internal func handleApplicationDidEnterBackground(_ notification: Notification) {
+        _wasBackgrounded = true
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             if self.isRecording {
                 self.pause()
@@ -3018,15 +3091,22 @@ extension NextLevel {
     
     @objc internal func handleSessionDidStartRunning(_ notification: Notification) {
         //self.performRecoveryCheckIfNecessary()
-        // TODO
+        if captureMode == .movie && (_movieFileOutput == nil || _movieFileOutput!.connection(with: .video) == nil) {
+            _ = self.addMovieOutput()
+            if _audioOutput == nil || _audioOutput!.connection(with: .audio) == nil {
+                _ = self.addAudioOuput()
+            }
+        }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
+            self._isReadyForSynchronousOrientationUpdates = true
         }
     }
     
     @objc internal func handleSessionDidStopRunning(_ notification: Notification) {
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStop(self)
+            self._isReadyForSynchronousOrientationUpdates = false
         }
     }
     
@@ -3051,6 +3131,7 @@ extension NextLevel {
         DispatchQueue.main.async {
             if self._recording {
                 self.delegate?.nextLevelSessionDidStop(self)
+                self._isReadyForSynchronousOrientationUpdates = false
             }
             
             DispatchQueue.main.async {
@@ -3097,8 +3178,14 @@ extension NextLevel {
     
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
-            self._sessionQueue.sync {
-                self.updateVideoOrientation()
+            if self._isReadyForSynchronousOrientationUpdates && !self._wasBackgrounded {
+                self._sessionQueue.sync {
+                    self.updateVideoOrientation()
+                }
+            } else {
+                self._sessionQueue.async {
+                    self.updateVideoOrientation()
+                }
             }
         }
     }
@@ -3160,6 +3247,7 @@ extension NextLevel {
             }
             
             DispatchQueue.main.async {
+                strongSelf.isTorchActive = currentDevice.isTorchActive
                 strongSelf.flashDelegate?.nextLevelTorchActiveChanged(strongSelf)
             }
         })
