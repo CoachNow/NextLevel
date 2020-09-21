@@ -1435,7 +1435,7 @@ extension NextLevel {
         }
         
         if didChangeOrientation == true {
-            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: deviceOrientation)
+            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: deviceOrientation!)
         }
     }
     
