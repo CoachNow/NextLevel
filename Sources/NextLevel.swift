@@ -409,6 +409,11 @@ public class NextLevel: NSObject {
         }
     }
 
+    // MARK: - CoachNow changes
+
+    /// Locks orientation change in case recording is in progress
+    public var lockDuringRecording = false
+
     // MARK: - private instance vars
 
     internal var _sessionQueue: DispatchQueue
@@ -3072,6 +3077,10 @@ extension NextLevel {
     }
 
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
+        if lockDuringRecording && isRecording {
+            return
+        }
+
         if self.automaticallyUpdatesDeviceOrientation {
             self._sessionQueue.sync {
                 self.updateVideoOrientation()
