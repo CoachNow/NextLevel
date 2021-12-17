@@ -317,6 +317,10 @@ extension NextLevelSession {
                 writer.metadata = NextLevel.assetWriterMetadata
 
                 if let videoInput = self._videoInput {
+                    if NextLevel.shared.transformVideoToOrientationWhenRecordingWasStarted {
+                        videoInput.transform = initialRecordingTransformation(for: videoInput.transform)
+                    }
+
                     if writer.canAdd(videoInput) {
                         writer.add(videoInput)
                     } else {
@@ -877,4 +881,12 @@ extension NextLevelSession {
         }
     }
 
+}
+
+private func initialRecordingTransformation(for initialTransform: CGAffineTransform) -> CGAffineTransform {
+    switch UIDevice.current.orientation {
+    case .landscapeLeft: return initialTransform.rotated(by: -CGFloat.pi/2.0)
+    case .landscapeRight: return initialTransform.rotated(by: CGFloat.pi/2.0)
+    default: return initialTransform
+    }
 }

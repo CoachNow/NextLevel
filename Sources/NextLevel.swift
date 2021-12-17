@@ -414,6 +414,8 @@ public class NextLevel: NSObject {
     /// Locks orientation change in case recording is in progress
     public var lockDuringRecording = false
 
+    public var transformVideoToOrientationWhenRecordingWasStarted = false
+
     // MARK: - private instance vars
 
     internal var _sessionQueue: DispatchQueue
