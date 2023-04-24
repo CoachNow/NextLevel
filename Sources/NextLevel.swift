@@ -328,10 +328,13 @@ public class NextLevel: NSObject {
     /// The current orientation of the device.
     public var deviceOrientation: NextLevelDeviceOrientation?
     public var isTorchActive: Bool = false
-        
-    public func setDeviceOrientationAndUpdateVideoOrientation(deviceOrientation: NextLevelDeviceOrientation) {
-        self.deviceOrientation = deviceOrientation
-        updateVideoOrientation()
+    public var preferredOrientation: NextLevelDeviceOrientation?
+    
+    public func setPreferredOrientation(_ deviceOrientation : NextLevelDeviceOrientation?, updatingVideoOrientation : Bool) {
+        self.preferredOrientation = deviceOrientation
+        if updatingVideoOrientation {
+            updateVideoOrientation()
+        }
     }
     
     public func initiateDeviceOrientationIfNeeded() {
@@ -1404,11 +1407,14 @@ extension NextLevel {
         }
         
         var didChangeOrientation = false
-        deviceOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        deviceOrientation = preferredOrientation ?? AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        //In our case, we allow rotation when using iPad but restrict on iPhone
+        //So we should rotate the preview on iPad but don't rotate on iPhone
+        let previewOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
         
         if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
-            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != deviceOrientation {
-                previewConnection.videoOrientation = deviceOrientation!
+            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != previewOrientation {
+                previewConnection.videoOrientation = previewOrientation
                 didChangeOrientation = true
             }
         }

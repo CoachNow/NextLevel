@@ -280,7 +280,7 @@ extension AVCaptureVideoOrientation {
         }
     }
     
-    internal static func avorientationFromUIDeviceOrientation(_ orientation: UIDeviceOrientation) -> AVCaptureVideoOrientation{
+    public static func avorientationFromUIDeviceOrientation(_ orientation: UIDeviceOrientation) -> AVCaptureVideoOrientation{
         var avorientation: AVCaptureVideoOrientation = NextLevel.shared.deviceOrientation ?? .portrait
         switch orientation {
         case .portrait:
