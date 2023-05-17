@@ -2489,36 +2489,43 @@ extension NextLevel {
     public func pause(withCompletionHandler completionHandler: (() -> Void)? = nil) {
         self._recording = false
         
-        self.executeClosureAsyncOnSessionQueueIfNecessary {
+        self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
+            guard let self  = self else {
+                completionHandler?()
+                return
+            }
+            
             if let session = self._recordingSession {
                 if self.captureMode == .movie {
                     self._movieFileOutput?.stopRecording()
                     if let completionHandler = completionHandler {
                         DispatchQueue.main.async(execute: completionHandler)
                     }
-                }else {
-                    if session.currentClipHasStarted {
-                        session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
-                            if let sessionClip = sessionClip {
-                                DispatchQueue.main.async {
-                                    self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
-                                }
-                                if let completionHandler = completionHandler {
-                                    DispatchQueue.main.async(execute: completionHandler)
-                                }
-                            } else if let _ = error {
-                                // TODO, report error
-                                if let completionHandler = completionHandler {
-                                    DispatchQueue.main.async(execute: completionHandler)
-                                }
+                } else {
+                    session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
+                        if let sessionClip = sessionClip {
+                            DispatchQueue.main.async {
+                                completionHandler?()
+                                self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
                             }
-                        })
-                    } else if let completionHandler = completionHandler {
-                        DispatchQueue.main.async(execute: completionHandler)
-                    }
+                        } else if let clipError = error {
+                            DispatchQueue.main.async {
+                                completionHandler?()
+                                self.videoDelegate?.nextLevel(self, didCompleteClip: clipError, inSession: session)
+                            }
+                        }
+                    })
                 }
-            } else if let completionHandler = completionHandler {
-                DispatchQueue.main.async(execute: completionHandler)
+            } else {
+                DispatchQueue.main.async {
+                    completionHandler?()
+                    
+                    let errorInfo = [NSLocalizedDescriptionKey: "Recording session does not extst."]
+                    let error = NSError(domain: "NextLevelError",
+                                        code: -1,
+                                        userInfo: errorInfo)
+                    self.videoDelegate?.nextLevel(self, didCompleteClip: error, inSession: nil)
+                }
             }
         }
     }
@@ -2795,8 +2802,8 @@ extension NextLevel {
                             DispatchQueue.main.async {
                                 self.videoDelegate?.nextLevel(self, didCompleteClip: clip, inSession: session)
                             }
-                        } else if let _ = error {
-                            // TODO report error
+                        } else if let clipError = error {
+                            self.videoDelegate?.nextLevel(self, didCompleteClip: clipError, inSession: session)
                         }
                         DispatchQueue.main.async {
                             self.videoDelegate?.nextLevel(self, didCompleteSession: session)
@@ -2851,22 +2858,31 @@ extension NextLevel: AVCaptureFileOutputRecordingDelegate {
     }
     
     public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        let clip = NextLevelClip(url: outputFileURL, infoDict: nil)
-            _recordingSession?.add(clip: clip)
-            if let videoDelegate = self.videoDelegate {
-                DispatchQueue.main.async {
-                    videoDelegate.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
-                }
-            }
+        
+        func completeSession() {
+            assert(Thread.isMainThread, "Main thread expected")
             if let maximumCaptureDuration = self.videoConfiguration.maximumCaptureDuration,
-                let session = self._recordingSession,
-                maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
-                DispatchQueue.main.async {
-                    self.videoDelegate?.nextLevel(self, didCompleteSession: session)
-                }
+               let session = self._recordingSession,
+               maximumCaptureDuration.isValid && output.recordedDuration >= maximumCaptureDuration {
+                self.videoDelegate?.nextLevel(self, didCompleteSession: session)
             }
+        }
+        
+        if let clipError = error {
+            DispatchQueue.main.async {
+                self.videoDelegate?.nextLevel(self, didCompleteClip: clipError, inSession: self._recordingSession)
+                completeSession()
+            }
+            return
+        }
+        
+        let clip = NextLevelClip(url: outputFileURL, infoDict: nil)
+        _recordingSession?.add(clip: clip)
+        DispatchQueue.main.async {
+            self.videoDelegate?.nextLevel(self, didCompleteClip: clip, inSession: self._recordingSession!)
+            completeSession()
+        }
     }
-    
 }
 
 // MARK: - AVCapturePhotoCaptureDelegate
