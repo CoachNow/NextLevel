@@ -639,8 +639,10 @@ extension NextLevel {
     }
     
     /// Stops the current recording session.
-    public func stop() {
+    public func stop(completion: (() -> Void)? = nil) {
+        let group: DispatchGroup? = completion == nil ? nil : DispatchGroup()
         if let session = self._captureSession {
+            group?.enter()
             self.executeClosureAsyncOnSessionQueueIfNecessary {
                 if session.isRunning == true {
                     session.stopRunning()
@@ -654,20 +656,27 @@ extension NextLevel {
                 self._recordingSession = nil
                 self._captureSession = nil
                 self._currentDevice = nil
+                group?.leave()
             }
         }
         
         #if USE_ARKIT
         if #available(iOS 11.0, *) {
             if self.captureMode == .arKit {
+                group?.enter()
                 self.executeClosureAsyncOnSessionQueueIfNecessary {
                     self.arConfiguration?.session?.pause()
                     self._arRunning = false
                     self._recordingSession = nil
+                    group?.leave()
                 }
             }
         }
         #endif
+        
+        group?.notify(queue: .main) {
+         completion?()
+        }
     }
     
     internal func setupAVSession() {
