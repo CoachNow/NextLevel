@@ -1710,6 +1710,16 @@ extension NextLevel {
         }
     }
     
+    /// Checks if custom exposure mode is supported.
+    public var isCustomExposureSupported: Bool {
+        get {
+            if let device: AVCaptureDevice = self._currentDevice {
+                return device.isExposureModeSupported(.custom)
+            }
+            return false
+        }
+    }
+
     /// Focuses, exposures, and adjusts white balanace at the point of interest.
     ///
     /// - Parameter adjustedPoint: The point of interest.
@@ -1854,22 +1864,29 @@ extension NextLevel {
     /// Adjusts exposure duration to a custom value in seconds.
     ///
     /// - Parameter duration: The exposure duration in seconds.
-    public func expose(withDuration duration: Double) {
-        guard let device = self._currentDevice
+    /// - Parameter durationPower: Larger power values will increase the sensitivity at shorter durations.
+    /// - Parameter minDurationRangeLimit: Minimum limitation for duration.
+    public func expose(withDuration duration: Double, durationPower: Double = 5, minDurationRangeLimit: Double = (1.0 / 1000.0)) {
+        guard let device = self._currentDevice,
+            !device.isAdjustingExposure
             else {
                 return
         }
-        var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
-        if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
-            durationTime = device.activeFormat.minExposureDuration
-        } else if (CMTimeCompare(durationTime, device.activeFormat.maxExposureDuration) > 0) {
-            durationTime = device.activeFormat.maxExposureDuration
-        }
-        
+
+        let newDuration = duration.clamped(to: 0...1)
+
+        let minDurationSeconds: Double = Swift.max(CMTimeGetSeconds(device.activeFormat.minExposureDuration), minDurationRangeLimit)
+        let maxDurationSeconds: Double = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
+
+        let p: Double = pow(newDuration, durationPower)
+        let newDurationSeconds: Double = (p * ( maxDurationSeconds - minDurationSeconds ) + minDurationSeconds)
+
         do {
             try device.lockForConfiguration()
-            
-            device.setExposureModeCustom(duration: durationTime, iso: AVCaptureDevice.currentISO, completionHandler: nil)
+
+            if device.isExposureModeSupported(.custom) {
+                device.setExposureModeCustom(duration: CMTimeMakeWithSeconds( newDurationSeconds, preferredTimescale: 1000*1000*1000 ), iso: AVCaptureDevice.currentISO, completionHandler: nil)
+            }
             
             device.unlockForConfiguration()
         } catch {
@@ -1881,18 +1898,21 @@ extension NextLevel {
     ///
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
-        guard let device = self._currentDevice
+        guard let device = self._currentDevice,
+            !device.isAdjustingExposure
             else {
                 return
         }
-        
+
         let newISO = iso.clamped(to: device.activeFormat.minISO...device.activeFormat.maxISO)
-        
+
         do {
             try device.lockForConfiguration()
-            
-            device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: newISO, completionHandler: nil)
-            
+
+            if device.isExposureModeSupported(.custom) {
+                device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: newISO, completionHandler: nil)
+            }
+
             device.unlockForConfiguration()
         } catch {
             print("NextLevel, setExposureModeCustom failed to lock device for configuration")
@@ -1902,10 +1922,12 @@ extension NextLevel {
     /// Adjusts exposure to the specified target bias.
     ///
     /// - Parameter targetBias: The exposure target bias.
-    public func expose(withTargetBias targetBias: Float) {
-        guard let device = self._currentDevice
-            else {
-                return
+    /// - Parameter force: Change even if adjust is already in progress.
+    /// - Parameter completionHandler: Called at completion.
+    public func expose(withTargetBias targetBias: Float, force: Bool = false, completionHandler: ((CMTime) -> Void)? = nil) {
+        guard let device = self._currentDevice,
+                !device.isAdjustingExposure || force else {
+            return
         }
         
         let newTargetBias = targetBias.clamped(to: device.minExposureTargetBias...device.maxExposureTargetBias)
@@ -1913,7 +1935,7 @@ extension NextLevel {
         do {
             try device.lockForConfiguration()
             
-            device.setExposureTargetBias(newTargetBias, completionHandler: nil)
+            device.setExposureTargetBias(newTargetBias, completionHandler: completionHandler)
             
             device.unlockForConfiguration()
         } catch {
@@ -2341,8 +2363,7 @@ extension NextLevel {
                     do {
                         try device.lockForConfiguration()
                         
-                        let zoom: Float = max(1, min(newValue, Float(device.activeFormat.videoMaxZoomFactor)))
-                        device.videoZoomFactor = CGFloat(zoom)
+                        device.videoZoomFactor = max(device.minAvailableVideoZoomFactor, min(CGFloat(newValue), device.activeFormat.videoMaxZoomFactor))
                         
                         device.unlockForConfiguration()
                     } catch {
@@ -2351,6 +2372,19 @@ extension NextLevel {
                 }
             }
         }
+    }
+    
+    /// Fetch threshold value where a device of the specified type might be chosen when zooming in using a composite camera.
+    ///
+    /// - Returns: Zoom threshold  or nil
+    @available(iOS 13.0, *)
+    public func switchOverVideoZoomFactorForDeviceType(_ deviceType: AVCaptureDevice.DeviceType) -> Float? {
+        guard let device = _currentDevice,
+              let index = device.constituentDevices.firstIndex(where: { $0.deviceType == deviceType }) else {
+            return nil
+        }
+        
+        return index > 0 ? device.virtualDeviceSwitchOverVideoZoomFactors[index - 1].floatValue : Float(device.minAvailableVideoZoomFactor)
     }
     
     /// Triggers a photo capture from the last video frame.

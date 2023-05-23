@@ -112,32 +112,14 @@ extension AVCaptureDevice {
         return nil
     }
     
-    /// Returns the primary duo camera video device, if available, else the default wide angel camera, otherwise nil.
+    /// Returns the first available camera device of specified types.
     ///
-    /// - Parameter position: Desired position of the device
+    /// - Parameters:
+    ///   - position: Desired position of the device
+    ///   - prioritizedDeviceTypes: Device types of interest, in descending order
     /// - Returns: Primary video capture device found, otherwise nil
-    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [AVCaptureDevice.DeviceType.builtInWideAngleCamera]
-        if #available(iOS 11.0, *) {
-            deviceTypes.append(.builtInDualCamera)
-        } else {
-            deviceTypes.append(.builtInDuoCamera)
-        }
-        
-        // prioritize duo camera systems before wide angle
-        let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: deviceTypes, mediaType: AVMediaType.video, position: position)
-        for device in discoverySession.devices {
-            if #available(iOS 11.0, *) {
-                if (device.deviceType == AVCaptureDevice.DeviceType.builtInDualCamera) {
-                    return device
-                }
-            } else {
-                if (device.deviceType == AVCaptureDevice.DeviceType.builtInDuoCamera) {
-                    return device
-                }
-            }
-        }
-        return discoverySession.devices.first
+    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType] = [/* .builtInTripleCamera,*/ .builtInDualCamera, .builtInWideAngleCamera]) -> AVCaptureDevice? {
+        AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedDeviceTypes, mediaType: AVMediaType.video, position: position).devices.first
     }
     
     /// Returns the default video capture device, otherwise nil.
