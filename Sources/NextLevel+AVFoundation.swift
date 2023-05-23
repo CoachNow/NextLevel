@@ -1,6 +1,6 @@
 //
 //  NextLevel+AVFoundation.swift
-//  NextLevel (http://nextlevel.engineering/)
+//  NextLevel (http://github.com/NextLevel/)
 //
 //  Copyright (c) 2016-present patrick piemonte (http://patrickpiemonte.com)
 //
@@ -111,47 +111,45 @@ extension AVCaptureDevice {
         }
         return nil
     }
-    
-    /// Returns the primary duo camera video device, if available, else the default wide angel camera, otherwise nil.
-    ///
-    /// - Parameter position: Desired position of the device
-    /// - Returns: Primary video capture device found, otherwise nil
-    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [AVCaptureDevice.DeviceType.builtInWideAngleCamera]
-        if #available(iOS 11.0, *) {
-            deviceTypes.append(.builtInDualCamera)
-        } else {
-            deviceTypes.append(.builtInDuoCamera)
-        }
+
+	/// Returns the first available camera device of specified types.
+	///
+	/// - Parameters:
+	///   - position: Desired position of the device
+	///   - prioritizedDeviceTypes: Device types of interest, in descending order
+	/// - Returns: Primary video capture device found, otherwise nil
+    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]) -> AVCaptureDevice? {
         
-        // prioritize duo camera systems before wide angle
-        let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: deviceTypes, mediaType: AVMediaType.video, position: position)
-        for device in discoverySession.devices {
-            if #available(iOS 11.0, *) {
-                if (device.deviceType == AVCaptureDevice.DeviceType.builtInDualCamera) {
-                    return device
-                }
-            } else {
-                if (device.deviceType == AVCaptureDevice.DeviceType.builtInDuoCamera) {
-                    return device
-                }
+        var prioritizedTypes = prioritizedDeviceTypes
+        
+        if #available(iOS 13.0, *) {
+            prioritizedTypes
+                .insert(contentsOf: [.builtInTripleCamera, .builtInDualWideCamera], at: 0)
+        } else {
+            if #available(iOS 10.2, *) {
+                prioritizedTypes.insert(.builtInDualCamera, at: 0)
             }
         }
-        return discoverySession.devices.first
+        
+        return AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedTypes,
+                                                mediaType: AVMediaType.video,
+                                                position: position)
+        .devices
+        .first
     }
-    
+
     /// Returns the default video capture device, otherwise nil.
     ///
     /// - Returns: Default video capture device, otherwise nil
     public class func videoDevice() -> AVCaptureDevice? {
-        return AVCaptureDevice.default(for: AVMediaType.video)
+        AVCaptureDevice.default(for: AVMediaType.video)
     }
     
     /// Returns the default audio capture device, otherwise nil.
     ///
     /// - Returns: default audio capture device, otherwise nil
     public class func audioDevice() -> AVCaptureDevice? {
-        return AVCaptureDevice.default(for: AVMediaType.audio)
+        AVCaptureDevice.default(for: AVMediaType.audio)
     }
     
     // MARK: - utilities
@@ -225,7 +223,7 @@ extension AVCaptureDevice.Position {
     /// - Parameter devicePosition: Camera device position to query.
     /// - Returns: `true` if the camera device exists, otherwise false.
     public var isCameraDevicePositionAvailable: Bool {
-        return UIImagePickerController.isCameraDeviceAvailable(self.uikitType)
+        UIImagePickerController.isCameraDeviceAvailable(self.uikitType)
     }
     
     /// UIKit device equivalent type
@@ -279,29 +277,8 @@ extension AVCaptureVideoOrientation {
             return .unknown
         }
     }
-    
-    public static func avorientationFromUIDeviceOrientation(_ orientation: UIDeviceOrientation) -> AVCaptureVideoOrientation{
-        var avorientation: AVCaptureVideoOrientation = NextLevel.shared.deviceOrientation ?? .portrait
-        switch orientation {
-        case .portrait:
-            avorientation = .portrait
-        case .landscapeLeft:
-            avorientation = .landscapeRight
-            break
-        case .landscapeRight:
-            avorientation = .landscapeLeft
-            break
-        case .portraitUpsideDown:
-            avorientation = .portraitUpsideDown
-            break
-        default:
-            break
-        }
-        return avorientation
-    }
 
-internal static func avorientationFromUIInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> AVCaptureVideoOrientation {
-        
+    internal static func avorientationFromUIDeviceOrientation(_ orientation: UIDeviceOrientation) -> AVCaptureVideoOrientation {
         var avorientation: AVCaptureVideoOrientation = .portrait
         switch orientation {
         case .portrait:
