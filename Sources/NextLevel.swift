@@ -2362,8 +2362,16 @@ extension NextLevel {
                 if let device = self._currentDevice {
                     do {
                         try device.lockForConfiguration()
+                        var minZoomFactor: CGFloat = 1
+                        let prefferedZoomFactor =
+                        min(CGFloat(newValue), device.activeFormat.videoMaxZoomFactor)
                         
-                        device.videoZoomFactor = max(device.minAvailableVideoZoomFactor, min(CGFloat(newValue), device.activeFormat.videoMaxZoomFactor))
+                        if #available(iOS 11.0, *) {
+                            minZoomFactor = device.minAvailableVideoZoomFactor
+                        }
+                        
+                        device.videoZoomFactor =
+                        max(minZoomFactor, prefferedZoomFactor)
                         
                         device.unlockForConfiguration()
                     } catch {
