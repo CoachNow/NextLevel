@@ -118,8 +118,20 @@ extension AVCaptureDevice {
     ///   - position: Desired position of the device
     ///   - prioritizedDeviceTypes: Device types of interest, in descending order
     /// - Returns: Primary video capture device found, otherwise nil
-    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType] = [/* .builtInTripleCamera,*/ .builtInDualCamera, .builtInWideAngleCamera]) -> AVCaptureDevice? {
-        AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedDeviceTypes, mediaType: AVMediaType.video, position: position).devices.first
+    public class func primaryVideoDevice(forPosition position: AVCaptureDevice.Position, prioritizedDeviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]) -> AVCaptureDevice? {
+        
+        var prioritizedTypes = prioritizedDeviceTypes
+        
+        if #available(iOS 13.0, *) {
+            prioritizedTypes
+                .insert(contentsOf: [.builtInTripleCamera, .builtInDualCamera, .builtInDualWideCamera], at: 0)
+        }
+        
+        return AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedTypes,
+                                                      mediaType: AVMediaType.video,
+                                                      position: position)
+            .devices
+            .first
     }
     
     /// Returns the default video capture device, otherwise nil.
