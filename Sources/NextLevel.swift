@@ -1710,6 +1710,16 @@ extension NextLevel {
         }
     }
     
+    /// Checks if custom exposure mode is supported.
+    public var isCustomExposureSupported: Bool {
+        get {
+            if let device: AVCaptureDevice = self._currentDevice {
+                return device.isExposureModeSupported(.custom)
+            }
+            return false
+        }
+    }
+
     /// Focuses, exposures, and adjusts white balanace at the point of interest.
     ///
     /// - Parameter adjustedPoint: The point of interest.
@@ -1855,10 +1865,13 @@ extension NextLevel {
     ///
     /// - Parameter duration: The exposure duration in seconds.
     public func expose(withDuration duration: Double) {
-        guard let device = self._currentDevice
-            else {
-                return
+        guard let device = self._currentDevice,
+              device.isExposureModeSupported(.custom),
+                !device.isAdjustingExposure
+        else {
+            return
         }
+
         var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
         if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
             durationTime = device.activeFormat.minExposureDuration
@@ -1868,10 +1881,10 @@ extension NextLevel {
         
         do {
             try device.lockForConfiguration()
-            
-            device.setExposureModeCustom(duration: durationTime, iso: AVCaptureDevice.currentISO, completionHandler: nil)
-            
-            device.unlockForConfiguration()
+            device.setExposureModeCustom(duration: durationTime,
+                                         iso: AVCaptureDevice.currentISO) { [weak device] _ in
+                device?.unlockForConfiguration()
+            }
         } catch {
             print("NextLevel, setExposureModeCustom failed to lock device for configuration")
         }
@@ -1881,9 +1894,11 @@ extension NextLevel {
     ///
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
-        guard let device = self._currentDevice
-            else {
-                return
+        guard let device = self._currentDevice,
+              device.isExposureModeSupported(.custom),
+              !device.isAdjustingExposure
+        else {
+            return
         }
         
         let newISO = iso.clamped(to: device.activeFormat.minISO...device.activeFormat.maxISO)
@@ -1891,9 +1906,10 @@ extension NextLevel {
         do {
             try device.lockForConfiguration()
             
-            device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration, iso: newISO, completionHandler: nil)
-            
-            device.unlockForConfiguration()
+            device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration,
+                                         iso: newISO) { [weak device] _ in
+                device?.unlockForConfiguration()
+            }
         } catch {
             print("NextLevel, setExposureModeCustom failed to lock device for configuration")
         }
@@ -1902,20 +1918,25 @@ extension NextLevel {
     /// Adjusts exposure to the specified target bias.
     ///
     /// - Parameter targetBias: The exposure target bias.
-    public func expose(withTargetBias targetBias: Float) {
-        guard let device = self._currentDevice
-            else {
-                return
+    /// - Parameter force: Change even if adjust is already in progress.
+    /// - Parameter completionHandler: Called at completion.
+    public func expose(withTargetBias targetBias: Float, force: Bool = false, completionHandler: ((CMTime) -> Void)? = nil) {
+        guard let device = self._currentDevice,
+              device.isExposureModeSupported(.custom),
+              !device.isAdjustingExposure || force else {
+            return
         }
         
-        let newTargetBias = targetBias.clamped(to: device.minExposureTargetBias...device.maxExposureTargetBias)
+        let newTargetBias =
+        targetBias.clamped(to: device.minExposureTargetBias...device.maxExposureTargetBias)
         
         do {
             try device.lockForConfiguration()
             
-            device.setExposureTargetBias(newTargetBias, completionHandler: nil)
-            
-            device.unlockForConfiguration()
+            device.setExposureTargetBias(newTargetBias) { [weak device] time in
+                device?.unlockForConfiguration()
+                completionHandler?(time)
+            }
         } catch {
             print("NextLevel, setExposureTargetBias failed to lock device for configuration")
         }
@@ -2340,9 +2361,16 @@ extension NextLevel {
                 if let device = self._currentDevice {
                     do {
                         try device.lockForConfiguration()
+                        var minZoomFactor: CGFloat = 1
+                        let prefferedZoomFactor =
+                        min(CGFloat(newValue), device.activeFormat.videoMaxZoomFactor)
                         
-                        let zoom: Float = max(1, min(newValue, Float(device.activeFormat.videoMaxZoomFactor)))
-                        device.videoZoomFactor = CGFloat(zoom)
+                        if #available(iOS 11.0, *) {
+                            minZoomFactor = device.minAvailableVideoZoomFactor
+                        }
+                        
+                        device.videoZoomFactor =
+                        max(minZoomFactor, prefferedZoomFactor)
                         
                         device.unlockForConfiguration()
                     } catch {
