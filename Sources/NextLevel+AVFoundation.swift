@@ -122,9 +122,8 @@ extension AVCaptureDevice {
         
         var prioritizedTypes = prioritizedDeviceTypes
         
-        if #available(iOS 13.0, *) {
-            prioritizedTypes
-                .insert(contentsOf: [.builtInTripleCamera, .builtInDualCamera], at: 0)
+        if #available(iOS 11.0, *) {
+            prioritizedTypes.append(.builtInDualCamera)
         }
         
         return AVCaptureDevice.DiscoverySession(deviceTypes: prioritizedTypes,
