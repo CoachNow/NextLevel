@@ -314,9 +314,11 @@ public class NextLevel: NSObject {
     /// The current device position.
     public var devicePosition: NextLevelDevicePosition = .back {
         didSet {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                self.configureSessionDevices()
-                self.updateVideoOrientation()
+            if devicePosition == .front {
+                self.executeClosureAsyncOnSessionQueueIfNecessary {
+                    self.configureSessionDevices()
+                    self.updateVideoOrientation()
+                }
             }
         }
     }
@@ -1384,6 +1386,7 @@ extension NextLevel {
     /// Changes capture device if the desired device is available.
     public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType,
                                                with completion: @escaping (() -> Void)) throws {
+        self.devicePosition = .back
         let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
