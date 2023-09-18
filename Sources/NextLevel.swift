@@ -259,7 +259,7 @@ public class NextLevel: NSObject {
     // preview
     
     /// Live camera preview, add as a sublayer to the UIView's primary layer.
-    public var previewLayer: AVCaptureVideoPreviewLayer
+    public var previewLayer: AVCaptureVideoPreviewLayer = AVCaptureVideoPreviewLayer()
     
     // capture configuration
     
@@ -314,9 +314,11 @@ public class NextLevel: NSObject {
     /// The current device position.
     public var devicePosition: NextLevelDevicePosition = .back {
         didSet {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                self.configureSessionDevices()
-                self.updateVideoOrientation()
+            if devicePosition == .front {
+                self.executeClosureAsyncOnSessionQueueIfNecessary {
+                    self.configureSessionDevices()
+                    self.updateVideoOrientation()
+                }
             }
         }
     }
@@ -495,7 +497,6 @@ public class NextLevel: NSObject {
     // MARK: - object lifecycle
     
     public override init() {
-        self.previewLayer = AVCaptureVideoPreviewLayer()
         self.previewLayer.videoGravity = AVLayerVideoGravity.resizeAspectFill
         
         self._sessionQueue = DispatchQueue(label: NextLevelCaptureSessionQueueIdentifier, qos: .userInteractive, target: DispatchQueue.global())
@@ -623,7 +624,9 @@ extension NextLevel {
         guard self.authorizationStatusForCurrentCaptureMode() == .authorized else {
             throw NextLevelError.authorization
         }
+        
         initiateDeviceOrientationIfNeeded()
+        
         if self.captureMode == .arKit {
             #if USE_ARKIT
             if #available(iOS 11.0, *) {
@@ -634,7 +637,8 @@ extension NextLevel {
             guard self._captureSession == nil else {
                 throw NextLevelError.started
             }
-            setupAVSession()
+            
+            setupAVSession(shouldConfigureForDevice: false)
         }
     }
     
@@ -679,7 +683,7 @@ extension NextLevel {
         }
     }
     
-    internal func setupAVSession() {
+    internal func setupAVSession(shouldConfigureForDevice: Bool = true) {
         // Note: use nextLevelSessionDidStart to ensure a device and session are available for configuration or format changes
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             // setup AV capture sesssion
@@ -698,10 +702,12 @@ extension NextLevel {
                 self.previewLayer.session = session
                 
                 self.configureSession()
-                self.configureSessionDevices()
-                self.configureMetadataObjects()
-                self.updateVideoOrientation()
+                if shouldConfigureForDevice {
+                    self.configureSessionDevices()
+                    self.updateVideoOrientation()
+                }
                 
+                self.configureMetadataObjects()
                 self.commitConfiguration()
                 
                 if session.isRunning == false {
@@ -832,7 +838,6 @@ extension NextLevel {
             if let captureDevice = captureDevice {
                 if captureDevice != self._currentDevice {
                     self.configureDevice(captureDevice: captureDevice, mediaType: AVMediaType.video)
-                    
                     let changingPosition = (captureDevice.position != self._currentDevice?.position)
                     if changingPosition {
                         DispatchQueue.main.async {
@@ -1374,11 +1379,14 @@ extension NextLevel {
     
     /// Triggers a camera device position change.
     public func flipCaptureDevicePosition() {
+        self._requestedDevice = nil
         self.devicePosition = self.devicePosition == .back ? .front : .back
     }
     
     /// Changes capture device if the desired device is available.
-    public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType) throws {
+    public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType,
+                                               with completion: @escaping (() -> Void)) throws {
+        self.devicePosition = .back
         let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
@@ -1387,11 +1395,12 @@ extension NextLevel {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
                 self.updateVideoOrientation()
+                completion()
             }
         }
     }
     
-    public func changeToPrimaryVideoDeviceForCurrentPosition() throws {
+    public func changeToPrimaryVideoDeviceForCurrentPosition(compleltion: @escaping (() -> Void)) throws {
         let deviceForUse = AVCaptureDevice.primaryVideoDevice(forPosition: self.devicePosition)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
@@ -1400,6 +1409,7 @@ extension NextLevel {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
                 self.updateVideoOrientation()
+                compleltion()
             }
         }
     }
@@ -1824,7 +1834,6 @@ extension NextLevel {
             
             do {
                 try device.lockForConfiguration()
-                
                 device.exposureMode = newValue
                 self.adjustWhiteBalanceForExposureMode(exposureMode: newValue)
                 

@@ -123,6 +123,7 @@ extension AVCaptureDevice {
         var prioritizedTypes = prioritizedDeviceTypes
         
         if #available(iOS 11.0, *) {
+            // .builtInDualWideCamera and .builtInTripleCamera are support 30 and 60 FPS only.
             prioritizedTypes.append(.builtInDualCamera)
         }
         
