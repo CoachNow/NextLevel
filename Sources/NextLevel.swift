@@ -1376,6 +1376,16 @@ extension NextLevel {
 // MARK: - capture device switching
 
 extension NextLevel {
+
+    /// Changes capture device to the provided one.
+    public func changeCaptureDevice(captureDevice: AVCaptureDevice, completion: @escaping (() -> Void)) {
+        self.devicePosition = captureDevice.position
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            self._requestedDevice = captureDevice
+            self.configureSessionDevices()
+            self.updateVideoOrientation()
+            completion()
+        }
     }
     
     /// Changes capture device if the desired device is available.
