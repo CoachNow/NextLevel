@@ -321,16 +321,7 @@ public class NextLevel: NSObject {
     }
     
     /// The current device position.
-    public var devicePosition: NextLevelDevicePosition = .back {
-        didSet {
-            if devicePosition == .front {
-                self.executeClosureAsyncOnSessionQueueIfNecessary {
-                    self.configureSessionDevices()
-                    self.updateVideoOrientation()
-                }
-            }
-        }
-    }
+    public var devicePosition: NextLevelDevicePosition = .back
     
     /// When `true` actives device orientation updates
     public var automaticallyUpdatesDeviceOrientation: Bool = false
@@ -1385,11 +1376,6 @@ extension NextLevel {
 // MARK: - capture device switching
 
 extension NextLevel {
-    
-    /// Triggers a camera device position change.
-    public func flipCaptureDevicePosition() {
-        self._requestedDevice = nil
-        self.devicePosition = self.devicePosition == .back ? .front : .back
     }
     
     /// Changes capture device if the desired device is available.
