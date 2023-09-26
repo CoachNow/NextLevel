@@ -61,12 +61,19 @@ public enum NextLevelDeviceType: Int, CustomStringConvertible {
     case duoCamera
     case ultraWideAngleCamera
     case tripleCamera
+    case dualWideCamera
     #if USE_TRUE_DEPTH
     case trueDepthCamera
     #endif
     
     public var avfoundationType: AVCaptureDevice.DeviceType {
         switch self {
+        case .dualWideCamera:
+            if #available(iOS 13.0, *) {
+                return AVCaptureDevice.DeviceType.builtInDualWideCamera
+            } else {
+                return AVCaptureDevice.DeviceType(rawValue: "Unavailable")
+            }
         case .microphone:
             return AVCaptureDevice.DeviceType.builtInMicrophone
         case .telephotoCamera:
@@ -105,6 +112,8 @@ public enum NextLevelDeviceType: Int, CustomStringConvertible {
     public var description: String {
         get {
             switch self {
+            case .dualWideCamera:
+                return "Dual Wide Angle Camera"
             case .microphone:
                 return "Microphone"
             case .wideAngleCamera:
@@ -312,16 +321,7 @@ public class NextLevel: NSObject {
     }
     
     /// The current device position.
-    public var devicePosition: NextLevelDevicePosition = .back {
-        didSet {
-            if devicePosition == .front {
-                self.executeClosureAsyncOnSessionQueueIfNecessary {
-                    self.configureSessionDevices()
-                    self.updateVideoOrientation()
-                }
-            }
-        }
-    }
+    public var devicePosition: NextLevelDevicePosition = .back
     
     /// When `true` actives device orientation updates
     public var automaticallyUpdatesDeviceOrientation: Bool = false
@@ -1376,11 +1376,16 @@ extension NextLevel {
 // MARK: - capture device switching
 
 extension NextLevel {
-    
-    /// Triggers a camera device position change.
-    public func flipCaptureDevicePosition() {
-        self._requestedDevice = nil
-        self.devicePosition = self.devicePosition == .back ? .front : .back
+
+    /// Changes capture device to the provided one.
+    public func changeCaptureDevice(captureDevice: AVCaptureDevice, completion: @escaping (() -> Void)) {
+        self.devicePosition = captureDevice.position
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            self._requestedDevice = captureDevice
+            self.configureSessionDevices()
+            self.updateVideoOrientation()
+            completion()
+        }
     }
     
     /// Changes capture device if the desired device is available.
