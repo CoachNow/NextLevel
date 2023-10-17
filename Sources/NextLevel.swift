@@ -305,17 +305,8 @@ public class NextLevel: NSObject {
                     return
             }
             
-            self.delegate?.nextLevelCaptureModeWillChange(self)
-            
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                self.configureSession()
-                self.configureSessionDevices()
-                self.configureMetadataObjects()
-                self.updateVideoOrientation()
-                if self.captureMode != .movie {
-                    self._movieFileOutput = nil
-                }
-                self.delegate?.nextLevelCaptureModeDidChange(self)
+            if self.captureMode != .movie {
+                self._movieFileOutput = nil
             }
         }
     }
