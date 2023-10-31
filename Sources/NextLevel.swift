@@ -608,10 +608,7 @@ extension NextLevel {
 
 extension NextLevel {
     
-    /// Starts the current recording session.
-    ///
-    /// - Throws: 'NextLevelError.authorization' when permissions are not authorized, 'NextLevelError.started' when the session has already started.
-    public func start() throws {
+    public func start(completion: (() -> Void)? = nil) throws {
         guard self.authorizationStatusForCurrentCaptureMode() == .authorized else {
             throw NextLevelError.authorization
         }
@@ -621,7 +618,7 @@ extension NextLevel {
         if self.captureMode == .arKit {
             #if USE_ARKIT
             if #available(iOS 11.0, *) {
-                setupARSession()
+                setupARSession(completion: completion)
             }
             #endif
         } else {
@@ -629,8 +626,15 @@ extension NextLevel {
                 throw NextLevelError.started
             }
             
-            setupAVSession(shouldConfigureForDevice: false)
+            setupAVSession(shouldConfigureForDevice: false, completion: completion)
         }
+    }
+    
+    /// Starts the current recording session.
+    ///
+    /// - Throws: 'NextLevelError.authorization' when permissions are not authorized, 'NextLevelError.started' when the session has already started.
+    public func start() throws {
+       try self.start(completion: nil)
     }
     
     /// Stops the current recording session.
@@ -674,7 +678,8 @@ extension NextLevel {
         }
     }
     
-    internal func setupAVSession(shouldConfigureForDevice: Bool = true) {
+    internal func setupAVSession(shouldConfigureForDevice: Bool = true,
+                                 completion: (() -> Void)? = nil) {
         // Note: use nextLevelSessionDidStart to ensure a device and session are available for configuration or format changes
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             // setup AV capture sesssion
@@ -709,11 +714,13 @@ extension NextLevel {
                     // nextLevelSessionDidStart is called from AVFoundation
                 }
             }
+            
+            completion?()
         }
     }
     
     @available(iOS 11.0, *)
-    internal func setupARSession() {
+    internal func setupARSession(completion: (() -> Void)? = nil) {
         #if USE_ARKIT
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             guard let config = self.arConfiguration?.config,
@@ -751,6 +758,7 @@ extension NextLevel {
             DispatchQueue.main.async {
                 self.delegate?.nextLevelSessionDidStart(self)
                 self._isCameraReady = true
+                completion?()
             }
         }
         #endif
