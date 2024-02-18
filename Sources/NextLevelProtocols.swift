@@ -105,6 +105,8 @@ public protocol NextLevelDeviceDelegate: AnyObject {
     func nextLevelWillChangeWhiteBalance(_ nextLevel: NextLevel)
     func nextLevelDidChangeWhiteBalance(_ nextLevel: NextLevel)
     
+    // Device
+    func nextLevel(_ nextLevel: NextLevel, didChangeDevice device: AVCaptureDevice)
 }
 
 // MARK: - NextLevelFlashAndTorchDelegate

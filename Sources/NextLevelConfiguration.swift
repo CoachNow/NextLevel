@@ -190,6 +190,8 @@ public class NextLevelVideoConfiguration: NextLevelConfiguration {
     /// Average video bit rate (bits per second), AV dictionary key AVVideoAverageBitRateKey
     public var bitRate: Int = NextLevelVideoConfiguration.VideoBitRateDefault
 
+    public var frameRate: Int32 = 30
+    
     /// Dimensions for video output, AV dictionary keys AVVideoWidthKey, AVVideoHeightKey
     public var dimensions: CGSize?
 
@@ -293,7 +295,7 @@ public class NextLevelVideoConfiguration: NextLevelConfiguration {
         var compressionDict: [String : Any] = [:]
         compressionDict[AVVideoAverageBitRateKey] = NSNumber(integerLiteral: self.bitRate)
         compressionDict[AVVideoAllowFrameReorderingKey] = NSNumber(booleanLiteral: false)
-        compressionDict[AVVideoExpectedSourceFrameRateKey] = NSNumber(integerLiteral: 30)
+        compressionDict[AVVideoExpectedSourceFrameRateKey] = NSNumber(integerLiteral: Int(self.frameRate))
         if let profileLevel = self.profileLevel {
             compressionDict[AVVideoProfileLevelKey] = profileLevel
         }

@@ -247,6 +247,7 @@ private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~4
 public class NextLevel: NSObject {
     
     // delegates
+    var shoulUpdate: Bool = false
     
     public weak var delegate: NextLevelDelegate?
     public weak var previewDelegate: NextLevelPreviewDelegate?
@@ -1377,21 +1378,20 @@ extension NextLevel {
 extension NextLevel {
 
     /// Changes capture device to the provided one.
-    public func changeCaptureDevice(captureDevice: AVCaptureDevice, completion: @escaping (() -> Void)) {
+    public func changeCaptureDevice(captureDevice: AVCaptureDevice) {
         self.devicePosition = captureDevice.position
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             self._requestedDevice = captureDevice
             self.configureSessionDevices()
             self.updateVideoOrientation()
-            completion()
         }
     }
     
     /// Changes capture device if the desired device is available.
     public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType,
-                                               with completion: @escaping (() -> Void)) throws {
-        self.devicePosition = .back
-        let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
+                                               position: AVCaptureDevice.Position) throws {
+        self.devicePosition = position
+        let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: position)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
         } else {
@@ -1399,7 +1399,6 @@ extension NextLevel {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
                 self.updateVideoOrientation()
-                completion()
             }
         }
     }
@@ -1471,6 +1470,18 @@ extension NextLevel {
     internal func updateVideoOutputSettings() {
         if let videoOutput = self._videoOutput {
             if let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+                
+                var compressionDict: [String: Any] = [:]
+                if self.videoConfiguration.bitRate != NextLevelVideoConfiguration.VideoBitRateDefault {
+                    compressionDict[AVVideoAverageBitRateKey] = NSNumber(integerLiteral: self.videoConfiguration.bitRate)
+                }
+                
+                if let btrt = self.frameRate {
+                    compressionDict[AVVideoExpectedSourceFrameRateKey] = NSNumber(integerLiteral: Int(btrt))
+                }
+                
+                videoOutput.videoSettings[AVVideoCompressionPropertiesKey] = (compressionDict as NSDictionary)
+                
                 if videoConnection.isVideoStabilizationSupported {
                     videoConnection.preferredVideoStabilizationMode = self.videoStabilizationMode
                 }
@@ -2223,43 +2234,13 @@ extension NextLevel {
     // frame rate
     
     /// Changes the current device frame rate.
-    public var frameRate: CMTimeScale {
+    public var frameRate: CMTimeScale? {
         get {
-            var frameRate: CMTimeScale = 0
-            if let session = self._captureSession,
-                let inputs = session.inputs as? [AVCaptureDeviceInput] {
-                for input in inputs {
-                    if input.device.hasMediaType(AVMediaType.video) {
-                        frameRate = input.device.activeVideoMaxFrameDuration.timescale
-                        break
-                    }
-                }
+            guard let device = self._currentDevice else {
+                return nil
             }
-            return frameRate
-        }
-        set {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                guard let device: AVCaptureDevice = self._currentDevice else {
-                    return
-                }
-                guard device.activeFormat.isSupported(withFrameRate: newValue)
-                    else {
-                        print("unsupported frame rate for current device format config, \(newValue) fps")
-                        return
-                }
-                    
-                let fps: CMTime = CMTimeMake(value: 1, timescale: newValue)
-                do {
-                    try device.lockForConfiguration()
-                    
-                    device.activeVideoMaxFrameDuration = fps
-                    device.activeVideoMinFrameDuration = fps
-                    
-                    device.unlockForConfiguration()
-                } catch {
-                    print("NextLevel, frame rate failed to lock device for configuration")
-                }
-            }
+            
+            return device.activeVideoMaxFrameDuration.timescale
         }
     }
     
@@ -2325,6 +2306,97 @@ extension NextLevel {
                 print("Nextlevel, could not find a current device format matching the requirements")
             }
             
+        }
+    }
+    
+    public func update(device: AVCaptureDevice,
+                       format: AVCaptureDevice.Format,
+                       preferredFrameRate: CMTimeScale,
+                       zoomScale: CGFloat) {
+       
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            do {
+                self.devicePosition = device.position
+                self._requestedDevice = device
+                self.configureSessionDevices()
+                
+                self._isReadyForSynchronousOrientationUpdates = false
+                
+                try device.lockForConfiguration()
+                
+                if device.activeFormat != format {
+                    device.activeFormat = format
+                }
+                
+                device.isSubjectAreaChangeMonitoringEnabled = false
+                
+                if device.isLowLightBoostSupported {
+                    device.automaticallyEnablesLowLightBoostWhenAvailable = false
+                }
+                
+                if device.isSmoothAutoFocusSupported {
+                    device.isSmoothAutoFocusEnabled = true
+                }
+                
+                device.videoZoomFactor = zoomScale
+                
+                let fps: CMTime = CMTimeMake(value: 1, timescale: preferredFrameRate)
+                device.activeVideoMaxFrameDuration = fps
+                device.activeVideoMinFrameDuration = fps
+                
+                device.unlockForConfiguration()
+                
+                self.updateVideoOrientation()
+
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
+                }
+                
+                self._isReadyForSynchronousOrientationUpdates = true
+            } catch {
+                print("NextLevel, active device format failed to lock device for configuration")
+                self._isReadyForSynchronousOrientationUpdates = true
+            }
+        }
+    }
+    
+    public
+    func update(format: AVCaptureDevice.Format,
+                frameRate: CMTimeScale,
+                shouldReloadVideoInput: Bool,
+                zoomScale: CGFloat) {
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device: AVCaptureDevice = self._currentDevice else {
+                return
+            }
+            
+            if shouldReloadVideoInput {
+                self.beginConfiguration()
+                self.session?._videoInput = nil
+                self.commitConfiguration()
+            }
+            
+            do {
+                try device.lockForConfiguration()
+               
+                if device.activeFormat != format {
+                    device.activeFormat = format
+                }
+                
+                device.videoZoomFactor = zoomScale
+                
+                let fps: CMTime = CMTimeMake(value: 1, timescale: frameRate)
+                device.activeVideoMaxFrameDuration = fps
+                device.activeVideoMinFrameDuration = fps
+                
+                device.unlockForConfiguration()
+                
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
+                }
+            } catch {
+                print("NextLevel, frame rate failed to lock device for configuration")
+            }
         }
     }
 }
