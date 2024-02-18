@@ -1602,7 +1602,7 @@ extension NextLevel {
     public var isTorchAvailable: Bool {
         get {
             if let device = self._currentDevice {
-                return device.hasTorch
+                return device.hasTorch && device.isTorchAvailable
             }
             return false
         }
@@ -1617,12 +1617,13 @@ extension NextLevel {
             return .off
         }
         set {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                guard let device = self._currentDevice,
-                    device.hasTorch,
-                    device.torchMode != newValue
-                    else {
-                        return
+            self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
+                guard let self,
+                      let device = self._currentDevice,
+                      device.hasTorch,
+                      device.torchMode != newValue
+                else {
+                    return
                 }
                 
                 do {
@@ -1631,6 +1632,10 @@ extension NextLevel {
                         device.torchMode = newValue
                     }
                     device.unlockForConfiguration()
+                    
+                    DispatchQueue.main.async {
+                        self.flashDelegate?.nextLevelDidChangeTorchMode(self)
+                    }
                 } catch {
                     print("NextLevel, torchMode failed to lock device for configuration")
                 }
