@@ -1014,7 +1014,7 @@ extension NextLevel {
                 }
                                 
                 if captureDevice.isLowLightBoostSupported {
-                    captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = true
+                    captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = false
                 }
                 captureDevice.unlockForConfiguration()
             }
