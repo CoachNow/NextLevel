@@ -1012,9 +1012,7 @@ extension NextLevel {
                 if captureDevice.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                     captureDevice.whiteBalanceMode = .continuousAutoWhiteBalance
                 }
-                
-                captureDevice.isSubjectAreaChangeMonitoringEnabled = true
-                
+                                
                 if captureDevice.isLowLightBoostSupported {
                     captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = true
                 }
@@ -1779,9 +1777,7 @@ extension NextLevel {
             if device.isWhiteBalanceModeSupported(whiteBalanceMode) {
                 device.whiteBalanceMode = whiteBalanceMode
             }
-            
-            device.isSubjectAreaChangeMonitoringEnabled = false
-            
+                        
             device.unlockForConfiguration()
         }
         catch {
@@ -2160,27 +2156,6 @@ extension NextLevel {
     }
     
     internal func focusEnded() {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus
-            else {
-                return
-        }
-        
-        let isAutoFocusEnabled: Bool = (device.focusMode == .autoFocus ||
-            device.focusMode == .continuousAutoFocus)
-        if isAutoFocusEnabled {
-            do {
-                try device.lockForConfiguration()
-                
-                device.isSubjectAreaChangeMonitoringEnabled = true
-                
-                device.unlockForConfiguration()
-            }
-            catch {
-                print("NextLevel, focus ending failed to lock device for configuration")
-            }
-        }
-        
         DispatchQueue.main.async {
             self.deviceDelegate?.nextLevelDidStopFocus(self)
         }
@@ -2193,27 +2168,6 @@ extension NextLevel {
     }
     
     internal func exposureEnded() {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
-            else {
-                return
-        }
-        
-        let isContinuousAutoExposureEnabled: Bool = (device.exposureMode == .continuousAutoExposure)
-        if isContinuousAutoExposureEnabled {
-            do {
-                try device.lockForConfiguration()
-                
-                device.isSubjectAreaChangeMonitoringEnabled = true
-                
-                device.unlockForConfiguration()
-            }
-            catch {
-                print("NextLevel, focus ending failed to lock device for configuration")
-            }
-        }
-        
         DispatchQueue.main.async {
             self.deviceDelegate?.nextLevelDidChangeExposure(self)
         }
@@ -3302,19 +3256,13 @@ extension NextLevel {
     // device
     
     internal func addDeviceObservers() {
-        NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceSubjectAreaDidChange(_:)), name: .AVCaptureDeviceSubjectAreaDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceInputPortFormatDescriptionDidChange(_:)), name: .AVCaptureInputPortFormatDescriptionDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceOrientationDidChange(_:)), name: UIDevice.orientationDidChangeNotification, object: nil)
     }
     
     internal func removeDeviceObservers() {
-        NotificationCenter.default.removeObserver(self, name: .AVCaptureDeviceSubjectAreaDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: .AVCaptureInputPortFormatDescriptionDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
-    }
-    
-    @objc internal func deviceSubjectAreaDidChange(_ notification: NSNotification) {
-        self.adjustFocusExposureAndWhiteBalance()
     }
     
     @objc internal func deviceInputPortFormatDescriptionDidChange(_ notification: Notification) {
