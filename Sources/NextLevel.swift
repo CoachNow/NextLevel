@@ -2255,16 +2255,13 @@ extension NextLevel {
                     
                     DispatchQueue.main.async {
                         self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
-                        self._isReadyForSynchronousOrientationUpdates = true
                     }
                 } catch {
                     print("NextLevel, active device format failed to lock device for configuration")
-                    self._isReadyForSynchronousOrientationUpdates = true
                 }
             } else {
                 print("Nextlevel, could not find a current device format matching the requirements")
             }
-            
         }
     }
     
@@ -2310,13 +2307,14 @@ extension NextLevel {
                 DispatchQueue.main.async {
                     self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
                 }
-                
-                self._isReadyForSynchronousOrientationUpdates = true
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
-                self._isReadyForSynchronousOrientationUpdates = true
             }
         }
+    }
+    
+    public func makeAbleToSyncOrientationUpdates() {
+        self._isReadyForSynchronousOrientationUpdates = true
     }
     
     public
@@ -3206,7 +3204,6 @@ extension NextLevel {
         }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
-            self._isReadyForSynchronousOrientationUpdates = true
         }
     }
     
