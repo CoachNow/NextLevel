@@ -247,6 +247,7 @@ private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~4
 public class NextLevel: NSObject {
     
     // delegates
+    var shoulUpdate: Bool = false
     
     public weak var delegate: NextLevelDelegate?
     public weak var previewDelegate: NextLevelPreviewDelegate?
@@ -1011,11 +1012,9 @@ extension NextLevel {
                 if captureDevice.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                     captureDevice.whiteBalanceMode = .continuousAutoWhiteBalance
                 }
-                
-                captureDevice.isSubjectAreaChangeMonitoringEnabled = true
-                
+                                
                 if captureDevice.isLowLightBoostSupported {
-                    captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = true
+                    captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = false
                 }
                 captureDevice.unlockForConfiguration()
             }
@@ -1377,21 +1376,20 @@ extension NextLevel {
 extension NextLevel {
 
     /// Changes capture device to the provided one.
-    public func changeCaptureDevice(captureDevice: AVCaptureDevice, completion: @escaping (() -> Void)) {
+    public func changeCaptureDevice(captureDevice: AVCaptureDevice) {
         self.devicePosition = captureDevice.position
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             self._requestedDevice = captureDevice
             self.configureSessionDevices()
             self.updateVideoOrientation()
-            completion()
         }
     }
     
     /// Changes capture device if the desired device is available.
     public func changeCaptureDeviceIfAvailable(captureDevice: NextLevelDeviceType,
-                                               with completion: @escaping (() -> Void)) throws {
-        self.devicePosition = .back
-        let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: .back)
+                                               position: AVCaptureDevice.Position) throws {
+        self.devicePosition = position
+        let deviceForUse = AVCaptureDevice.captureDevice(withType: captureDevice.avfoundationType, forPosition: position)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
         } else {
@@ -1399,7 +1397,6 @@ extension NextLevel {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
                 self.updateVideoOrientation()
-                completion()
             }
         }
     }
@@ -1471,6 +1468,18 @@ extension NextLevel {
     internal func updateVideoOutputSettings() {
         if let videoOutput = self._videoOutput {
             if let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+                
+                var compressionDict: [String: Any] = [:]
+                if self.videoConfiguration.bitRate != NextLevelVideoConfiguration.VideoBitRateDefault {
+                    compressionDict[AVVideoAverageBitRateKey] = NSNumber(integerLiteral: self.videoConfiguration.bitRate)
+                }
+                
+                if let btrt = self.frameRate {
+                    compressionDict[AVVideoExpectedSourceFrameRateKey] = NSNumber(integerLiteral: Int(btrt))
+                }
+                
+                videoOutput.videoSettings[AVVideoCompressionPropertiesKey] = (compressionDict as NSDictionary)
+                
                 if videoConnection.isVideoStabilizationSupported {
                     videoConnection.preferredVideoStabilizationMode = self.videoStabilizationMode
                 }
@@ -1591,7 +1600,7 @@ extension NextLevel {
     public var isTorchAvailable: Bool {
         get {
             if let device = self._currentDevice {
-                return device.hasTorch
+                return device.hasTorch && device.isTorchAvailable
             }
             return false
         }
@@ -1606,12 +1615,13 @@ extension NextLevel {
             return .off
         }
         set {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                guard let device = self._currentDevice,
-                    device.hasTorch,
-                    device.torchMode != newValue
-                    else {
-                        return
+            self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
+                guard let self,
+                      let device = self._currentDevice,
+                      device.hasTorch,
+                      device.torchMode != newValue
+                else {
+                    return
                 }
                 
                 do {
@@ -1620,6 +1630,10 @@ extension NextLevel {
                         device.torchMode = newValue
                     }
                     device.unlockForConfiguration()
+                    
+                    DispatchQueue.main.async {
+                        self.flashDelegate?.nextLevelDidChangeTorchMode(self)
+                    }
                 } catch {
                     print("NextLevel, torchMode failed to lock device for configuration")
                 }
@@ -1763,9 +1777,7 @@ extension NextLevel {
             if device.isWhiteBalanceModeSupported(whiteBalanceMode) {
                 device.whiteBalanceMode = whiteBalanceMode
             }
-            
-            device.isSubjectAreaChangeMonitoringEnabled = false
-            
+                        
             device.unlockForConfiguration()
         }
         catch {
@@ -2144,27 +2156,6 @@ extension NextLevel {
     }
     
     internal func focusEnded() {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus
-            else {
-                return
-        }
-        
-        let isAutoFocusEnabled: Bool = (device.focusMode == .autoFocus ||
-            device.focusMode == .continuousAutoFocus)
-        if isAutoFocusEnabled {
-            do {
-                try device.lockForConfiguration()
-                
-                device.isSubjectAreaChangeMonitoringEnabled = true
-                
-                device.unlockForConfiguration()
-            }
-            catch {
-                print("NextLevel, focus ending failed to lock device for configuration")
-            }
-        }
-        
         DispatchQueue.main.async {
             self.deviceDelegate?.nextLevelDidStopFocus(self)
         }
@@ -2177,27 +2168,6 @@ extension NextLevel {
     }
     
     internal func exposureEnded() {
-        guard let device = self._currentDevice,
-            !device.isAdjustingFocus,
-            !device.isAdjustingExposure
-            else {
-                return
-        }
-        
-        let isContinuousAutoExposureEnabled: Bool = (device.exposureMode == .continuousAutoExposure)
-        if isContinuousAutoExposureEnabled {
-            do {
-                try device.lockForConfiguration()
-                
-                device.isSubjectAreaChangeMonitoringEnabled = true
-                
-                device.unlockForConfiguration()
-            }
-            catch {
-                print("NextLevel, focus ending failed to lock device for configuration")
-            }
-        }
-        
         DispatchQueue.main.async {
             self.deviceDelegate?.nextLevelDidChangeExposure(self)
         }
@@ -2223,43 +2193,13 @@ extension NextLevel {
     // frame rate
     
     /// Changes the current device frame rate.
-    public var frameRate: CMTimeScale {
+    public var frameRate: CMTimeScale? {
         get {
-            var frameRate: CMTimeScale = 0
-            if let session = self._captureSession,
-                let inputs = session.inputs as? [AVCaptureDeviceInput] {
-                for input in inputs {
-                    if input.device.hasMediaType(AVMediaType.video) {
-                        frameRate = input.device.activeVideoMaxFrameDuration.timescale
-                        break
-                    }
-                }
+            guard let device = self._currentDevice else {
+                return nil
             }
-            return frameRate
-        }
-        set {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
-                guard let device: AVCaptureDevice = self._currentDevice else {
-                    return
-                }
-                guard device.activeFormat.isSupported(withFrameRate: newValue)
-                    else {
-                        print("unsupported frame rate for current device format config, \(newValue) fps")
-                        return
-                }
-                    
-                let fps: CMTime = CMTimeMake(value: 1, timescale: newValue)
-                do {
-                    try device.lockForConfiguration()
-                    
-                    device.activeVideoMaxFrameDuration = fps
-                    device.activeVideoMinFrameDuration = fps
-                    
-                    device.unlockForConfiguration()
-                } catch {
-                    print("NextLevel, frame rate failed to lock device for configuration")
-                }
-            }
+            
+            return device.activeVideoMaxFrameDuration.timescale
         }
     }
     
@@ -2315,16 +2255,105 @@ extension NextLevel {
                     
                     DispatchQueue.main.async {
                         self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
-                        self._isReadyForSynchronousOrientationUpdates = true
                     }
                 } catch {
                     print("NextLevel, active device format failed to lock device for configuration")
-                    self._isReadyForSynchronousOrientationUpdates = true
                 }
             } else {
                 print("Nextlevel, could not find a current device format matching the requirements")
             }
+        }
+    }
+    
+    public func update(device: AVCaptureDevice,
+                       format: AVCaptureDevice.Format,
+                       preferredFrameRate: CMTimeScale,
+                       zoomScale: CGFloat) {
+       
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            do {
+                self.devicePosition = device.position
+                self._requestedDevice = device
+                self.configureSessionDevices()
+                
+                self._isReadyForSynchronousOrientationUpdates = false
+                
+                try device.lockForConfiguration()
+                
+                if device.activeFormat != format {
+                    device.activeFormat = format
+                }
+                
+                device.isSubjectAreaChangeMonitoringEnabled = false
+                
+                if device.isLowLightBoostSupported {
+                    device.automaticallyEnablesLowLightBoostWhenAvailable = false
+                }
+                
+                if device.isSmoothAutoFocusSupported {
+                    device.isSmoothAutoFocusEnabled = true
+                }
+                
+                device.videoZoomFactor = zoomScale
+                
+                let fps: CMTime = CMTimeMake(value: 1, timescale: preferredFrameRate)
+                device.activeVideoMaxFrameDuration = fps
+                device.activeVideoMinFrameDuration = fps
+                
+                device.unlockForConfiguration()
+                
+                self.updateVideoOrientation()
+
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
+                }
+            } catch {
+                print("NextLevel, active device format failed to lock device for configuration")
+            }
+        }
+    }
+    
+    public func makeAbleToSyncOrientationUpdates() {
+        self._isReadyForSynchronousOrientationUpdates = true
+    }
+    
+    public
+    func update(format: AVCaptureDevice.Format,
+                frameRate: CMTimeScale,
+                shouldReloadVideoInput: Bool,
+                zoomScale: CGFloat) {
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device: AVCaptureDevice = self._currentDevice else {
+                return
+            }
             
+            if shouldReloadVideoInput {
+                self.beginConfiguration()
+                self.session?._videoInput = nil
+                self.commitConfiguration()
+            }
+            
+            do {
+                try device.lockForConfiguration()
+               
+                if device.activeFormat != format {
+                    device.activeFormat = format
+                }
+                
+                device.videoZoomFactor = zoomScale
+                
+                let fps: CMTime = CMTimeMake(value: 1, timescale: frameRate)
+                device.activeVideoMaxFrameDuration = fps
+                device.activeVideoMinFrameDuration = fps
+                
+                device.unlockForConfiguration()
+                
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didChangeDeviceFormat: format)
+                }
+            } catch {
+                print("NextLevel, frame rate failed to lock device for configuration")
+            }
         }
     }
 }
@@ -3175,7 +3204,6 @@ extension NextLevel {
         }
         DispatchQueue.main.async {
             self.delegate?.nextLevelSessionDidStart(self)
-            self._isReadyForSynchronousOrientationUpdates = true
         }
     }
     
@@ -3225,19 +3253,13 @@ extension NextLevel {
     // device
     
     internal func addDeviceObservers() {
-        NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceSubjectAreaDidChange(_:)), name: .AVCaptureDeviceSubjectAreaDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceInputPortFormatDescriptionDidChange(_:)), name: .AVCaptureInputPortFormatDescriptionDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(NextLevel.deviceOrientationDidChange(_:)), name: UIDevice.orientationDidChangeNotification, object: nil)
     }
     
     internal func removeDeviceObservers() {
-        NotificationCenter.default.removeObserver(self, name: .AVCaptureDeviceSubjectAreaDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: .AVCaptureInputPortFormatDescriptionDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
-    }
-    
-    @objc internal func deviceSubjectAreaDidChange(_ notification: NSNotification) {
-        self.adjustFocusExposureAndWhiteBalance()
     }
     
     @objc internal func deviceInputPortFormatDescriptionDidChange(_ notification: Notification) {
