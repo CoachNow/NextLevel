@@ -2302,9 +2302,14 @@ extension NextLevel {
                 
                 device.unlockForConfiguration()
                 
-                self.updateVideoOrientation()
-
+                if self.automaticallyUpdatesPreviewOrientation == false {
+                    self.updateVideoOrientation()
+                }
+                
                 DispatchQueue.main.async {
+                    if self.automaticallyUpdatesPreviewOrientation {
+                        self.updateVideoOrientation()
+                    }
                     self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
                 }
             } catch {
