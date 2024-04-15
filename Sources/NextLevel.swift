@@ -1415,6 +1415,16 @@ extension NextLevel {
         }
     }
     
+    private func runOnMainThreadIfNeeded(block: @escaping (() -> Void)) {
+        if Thread.current.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async {
+                block()
+            }
+        }
+    }
+    
     internal func updateVideoOrientation() {
         guard !isRecording else {
             return
@@ -1434,34 +1444,44 @@ extension NextLevel {
         
         if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
             if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != previewOrientation {
-                previewConnection.videoOrientation = previewOrientation
+                runOnMainThreadIfNeeded {
+                    previewConnection.videoOrientation = previewOrientation
+                }
                 didChangeOrientation = true
             }
         }
         
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
-                videoConnection.videoOrientation = deviceOrientation!
+                runOnMainThreadIfNeeded {
+                    videoConnection.videoOrientation = self.deviceOrientation!
+                }
                 didChangeOrientation = true
             }
         }
         
         if let movieOutput = self._movieFileOutput, let videoConnection = movieOutput.connection(with: .video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
-                videoConnection.videoOrientation = deviceOrientation!
+                runOnMainThreadIfNeeded {
+                    videoConnection.videoOrientation = self.deviceOrientation!
+                }
                 didChangeOrientation = true
             }
         }
         
         if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(with: AVMediaType.video) {
             if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != deviceOrientation {
-                photoConnection.videoOrientation = deviceOrientation!
+                runOnMainThreadIfNeeded {
+                    photoConnection.videoOrientation = self.deviceOrientation!
+                }
                 didChangeOrientation = true
             }
         }
         
         if didChangeOrientation == true {
-            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: deviceOrientation!)
+            runOnMainThreadIfNeeded {
+                self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
+            }
         }
     }
     
@@ -2306,12 +2326,10 @@ extension NextLevel {
                     self.updateVideoOrientation()
                 }
                 
-                DispatchQueue.main.async {
-                    if self.automaticallyUpdatesPreviewOrientation {
-                        self.updateVideoOrientation()
-                    }
-                    self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
+                if self.automaticallyUpdatesPreviewOrientation {
+                    self.updateVideoOrientation()
                 }
+                self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
             }
