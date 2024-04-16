@@ -1436,50 +1436,47 @@ extension NextLevel {
             }
         }
         
-        var didChangeOrientation = false
-        deviceOrientation = preferredOrientation ?? AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
-        //In our case, we allow rotation when using iPad but restrict on iPhone
-        //So we should rotate the preview on iPad but don't rotate on iPhone
-        let previewOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
-        
-        if let previewConnection = self.previewLayer.connection, self.automaticallyUpdatesPreviewOrientation {
-            if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != previewOrientation {
-                runOnMainThreadIfNeeded {
+        runOnMainThreadIfNeeded {
+            
+            var didChangeOrientation = false
+            self.deviceOrientation = self.preferredOrientation ?? AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+            //In our case, we allow rotation when using iPad but restrict on iPhone
+            //So we should rotate the preview on iPad but don't rotate on iPhone
+            let previewOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+            
+            if let previewConnection = self.previewLayer.connection,
+               self.automaticallyUpdatesPreviewOrientation {
+                if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != previewOrientation {
                     previewConnection.videoOrientation = previewOrientation
+                    didChangeOrientation = true
                 }
-                didChangeOrientation = true
             }
-        }
-        
-        if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
-            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
-                runOnMainThreadIfNeeded {
+            
+            if let videoOutput = self._videoOutput,
+                let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+                if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != self.deviceOrientation {
                     videoConnection.videoOrientation = self.deviceOrientation!
+                    didChangeOrientation = true
                 }
-                didChangeOrientation = true
             }
-        }
-        
-        if let movieOutput = self._movieFileOutput, let videoConnection = movieOutput.connection(with: .video) {
-            if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != deviceOrientation {
-                runOnMainThreadIfNeeded {
+            
+            if let movieOutput = self._movieFileOutput,
+               let videoConnection = movieOutput.connection(with: .video) {
+                if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != self.deviceOrientation {
                     videoConnection.videoOrientation = self.deviceOrientation!
+                    didChangeOrientation = true
                 }
-                didChangeOrientation = true
             }
-        }
-        
-        if let photoOutput = self._photoOutput, let photoConnection = photoOutput.connection(with: AVMediaType.video) {
-            if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != deviceOrientation {
-                runOnMainThreadIfNeeded {
+            
+            if let photoOutput = self._photoOutput, 
+                let photoConnection = photoOutput.connection(with: AVMediaType.video) {
+                if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != self.deviceOrientation {
                     photoConnection.videoOrientation = self.deviceOrientation!
+                    didChangeOrientation = true
                 }
-                didChangeOrientation = true
             }
-        }
-        
-        if didChangeOrientation == true {
-            runOnMainThreadIfNeeded {
+            
+            if didChangeOrientation == true {
                 self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
             }
         }
