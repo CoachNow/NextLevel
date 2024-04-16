@@ -1409,8 +1409,9 @@ extension NextLevel {
             self.executeClosureAsyncOnSessionQueueIfNecessary {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
-                self.updateVideoOrientation()
-                compleltion()
+                self.updateVideoOrientation(completion: {
+                    compleltion()
+                })
             }
         }
     }
@@ -1425,8 +1426,9 @@ extension NextLevel {
         }
     }
     
-    internal func updateVideoOrientation() {
+    internal func updateVideoOrientation(completion: (() -> Void)? = nil) {
         guard !isRecording else {
+            completion?()
             return
         }
         
@@ -1436,42 +1438,58 @@ extension NextLevel {
             }
         }
         
-        runOnMainThreadIfNeeded {
+        runOnMainThreadIfNeeded { [weak self] in
+            guard let self else {
+                completion?()
+                return
+            }
             
-            var didChangeOrientation = false
-            self.deviceOrientation = self.preferredOrientation ?? AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
-            //In our case, we allow rotation when using iPad but restrict on iPhone
-            //So we should rotate the preview on iPad but don't rotate on iPhone
+            self.deviceOrientation = self.preferredOrientation
+            
             let previewOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
             
+            if (self.deviceOrientation == nil) {
+                self.deviceOrientation = previewOrientation
+            }
+            
+            guard let orientation = self.deviceOrientation else {
+                completion?()
+                return
+            }
+            
+            var didChangeOrientation = false
             if let previewConnection = self.previewLayer.connection,
                self.automaticallyUpdatesPreviewOrientation {
-                if previewConnection.isVideoOrientationSupported && previewConnection.videoOrientation != previewOrientation {
-                    previewConnection.videoOrientation = previewOrientation
+                if previewConnection.isVideoOrientationSupported &&
+                    previewConnection.videoOrientation != orientation {
+                    previewConnection.videoOrientation = orientation
                     didChangeOrientation = true
                 }
             }
             
             if let videoOutput = self._videoOutput,
-                let videoConnection = videoOutput.connection(with: AVMediaType.video) {
-                if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != self.deviceOrientation {
-                    videoConnection.videoOrientation = self.deviceOrientation!
+               let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+                if videoConnection.isVideoOrientationSupported &&
+                    videoConnection.videoOrientation != orientation {
+                    videoConnection.videoOrientation = orientation
                     didChangeOrientation = true
                 }
             }
             
             if let movieOutput = self._movieFileOutput,
                let videoConnection = movieOutput.connection(with: .video) {
-                if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != self.deviceOrientation {
-                    videoConnection.videoOrientation = self.deviceOrientation!
+                if videoConnection.isVideoOrientationSupported &&
+                    videoConnection.videoOrientation != orientation {
+                    videoConnection.videoOrientation = orientation
                     didChangeOrientation = true
                 }
             }
             
-            if let photoOutput = self._photoOutput, 
-                let photoConnection = photoOutput.connection(with: AVMediaType.video) {
-                if photoConnection.isVideoOrientationSupported && photoConnection.videoOrientation != self.deviceOrientation {
-                    photoConnection.videoOrientation = self.deviceOrientation!
+            if let photoOutput = self._photoOutput,
+               let photoConnection = photoOutput.connection(with: AVMediaType.video) {
+                if photoConnection.isVideoOrientationSupported &&
+                    photoConnection.videoOrientation != orientation {
+                    photoConnection.videoOrientation = orientation
                     didChangeOrientation = true
                 }
             }
@@ -1479,6 +1497,8 @@ extension NextLevel {
             if didChangeOrientation == true {
                 self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
             }
+            
+            completion?()
         }
     }
     
@@ -2319,14 +2339,13 @@ extension NextLevel {
                 
                 device.unlockForConfiguration()
                 
-                if self.automaticallyUpdatesPreviewOrientation == false {
-                    self.updateVideoOrientation()
+                self.updateVideoOrientation { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    
+                    self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
                 }
-                
-                if self.automaticallyUpdatesPreviewOrientation {
-                    self.updateVideoOrientation()
-                }
-                self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
             }
