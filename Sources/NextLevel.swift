@@ -627,7 +627,7 @@ extension NextLevel {
                 throw NextLevelError.started
             }
             
-            setupAVSession(shouldConfigureForDevice: false, completion: completion)
+            setupAVSession(shouldConfigureForDevice: true, completion: completion)
         }
     }
     
