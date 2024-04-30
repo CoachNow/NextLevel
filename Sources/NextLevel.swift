@@ -1417,7 +1417,7 @@ extension NextLevel {
     }
     
     private func runOnMainThreadIfNeeded(block: @escaping (() -> Void)) {
-        if Thread.current.isMainThread {
+        if Thread.current.isMainThread || !automaticallyUpdatesPreviewOrientation {
             block()
         } else {
             DispatchQueue.main.async {
