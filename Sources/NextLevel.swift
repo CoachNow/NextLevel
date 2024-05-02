@@ -247,8 +247,6 @@ private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~4
 public class NextLevel: NSObject {
     
     // delegates
-    var shoulUpdate: Bool = false
-    
     public weak var delegate: NextLevelDelegate?
     public weak var previewDelegate: NextLevelPreviewDelegate?
     public weak var deviceDelegate: NextLevelDeviceDelegate?
@@ -322,34 +320,7 @@ public class NextLevel: NSObject {
     /// The current orientation of the device.
     public var deviceOrientation: NextLevelDeviceOrientation?
     public var isTorchActive: Bool = false
-    public var preferredOrientation: NextLevelDeviceOrientation?
-    
-    public func setPreferredOrientation(_ deviceOrientation : NextLevelDeviceOrientation?, updatingVideoOrientation : Bool) {
-        self.preferredOrientation = deviceOrientation
-        if updatingVideoOrientation {
-            updateVideoOrientation()
-        }
-    }
-    
-    public func initiateDeviceOrientationIfNeeded() {
-            if deviceOrientation == nil {
-                switch UIApplication.shared.statusBarOrientation {
-                case .portrait:
-                    deviceOrientation = .portrait
-                case .portraitUpsideDown:
-                    deviceOrientation = .portraitUpsideDown
-                case .landscapeLeft:
-                    deviceOrientation = .landscapeLeft
-                case .landscapeRight:
-                    deviceOrientation = .landscapeRight
-                default:
-                    deviceOrientation = .portrait
-                }
-            }
-        }
-    
-    // stabilization
-    
+        
     /// When `true`, enables photo capture stabilization.
     public var photoStabilizationEnabled: Bool = false
     
@@ -614,7 +585,7 @@ extension NextLevel {
             throw NextLevelError.authorization
         }
         
-        initiateDeviceOrientationIfNeeded()
+//        initiateDeviceOrientationIfNeeded()
         
         if self.captureMode == .arKit {
             #if USE_ARKIT
@@ -627,7 +598,7 @@ extension NextLevel {
                 throw NextLevelError.started
             }
             
-            setupAVSession(shouldConfigureForDevice: true, completion: completion)
+            setupAVSession(shouldConfigureForDevice: false, completion: completion)
         }
     }
     
@@ -1176,10 +1147,16 @@ extension NextLevel {
                     movieFileOutputConnection.preferredVideoStabilizationMode = .auto
                 }
 
-                initiateDeviceOrientationIfNeeded()
-
-                movieFileOutputConnection.videoOrientation = self.deviceOrientation!
-
+                if (self.deviceOrientation == nil) {
+                    self.deviceOrientation =
+                    AVCaptureVideoOrientation
+                        .avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+                }
+                
+                if self.deviceOrientation != nil {
+                    movieFileOutputConnection.videoOrientation = self.deviceOrientation!
+                }
+                
                 var videoSettings: [String: Any] = [:]
                     if let availableVideoCodecTypes = self._movieFileOutput?.availableVideoCodecTypes,
                        availableVideoCodecTypes.contains(self.videoConfiguration.codec) {
@@ -1381,7 +1358,11 @@ extension NextLevel {
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             self._requestedDevice = captureDevice
             self.configureSessionDevices()
-            self.updateVideoOrientation()
+            if let result = self.updateVideoOrientation() {
+                self.runOnMainThreadIfNeeded { [weak self] in
+                    self?.updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: result.didChangeOrientation)
+                }
+            }
         }
     }
     
@@ -1401,7 +1382,7 @@ extension NextLevel {
         }
     }
     
-    public func changeToPrimaryVideoDeviceForCurrentPosition(compleltion: @escaping (() -> Void)) throws {
+    public func changeToPrimaryVideoDeviceForCurrentPosition(completion: @escaping (() -> Void)) throws {
         let deviceForUse = AVCaptureDevice.primaryVideoDevice(forPosition: self.devicePosition)
         if deviceForUse == nil {
             throw NextLevelError.deviceNotAvailable
@@ -1409,15 +1390,18 @@ extension NextLevel {
             self.executeClosureAsyncOnSessionQueueIfNecessary {
                 self._requestedDevice = deviceForUse
                 self.configureSessionDevices()
-                self.updateVideoOrientation(completion: {
-                    compleltion()
-                })
+                if let result = self.updateVideoOrientation() {
+                    self.runOnMainThreadIfNeeded { [weak self] in
+                        self?.updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: result.didChangeOrientation)
+                        completion()
+                    }
+                }
             }
         }
     }
     
     private func runOnMainThreadIfNeeded(block: @escaping (() -> Void)) {
-        if Thread.current.isMainThread || !automaticallyUpdatesPreviewOrientation {
+        if Thread.current.isMainThread {
             block()
         } else {
             DispatchQueue.main.async {
@@ -1426,10 +1410,11 @@ extension NextLevel {
         }
     }
     
-    internal func updateVideoOrientation(completion: (() -> Void)? = nil) {
+    @discardableResult
+    internal func updateVideoOrientation() ->
+    (didChangeOrientation: Bool, previewLayerOrientation: AVCaptureVideoOrientation)? {
         guard !isRecording else {
-            completion?()
-            return
+            return nil
         }
         
         if let session = self._recordingSession {
@@ -1438,68 +1423,43 @@ extension NextLevel {
             }
         }
         
-        runOnMainThreadIfNeeded { [weak self] in
-            guard let self else {
-                completion?()
-                return
-            }
-            
-            self.deviceOrientation = self.preferredOrientation
-            
-            let previewOrientation = AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
-            
-            if (self.deviceOrientation == nil) {
-                self.deviceOrientation = previewOrientation
-            }
-            
-            guard let orientation = self.deviceOrientation else {
-                completion?()
-                return
-            }
-            
-            var didChangeOrientation = false
-            if let previewConnection = self.previewLayer.connection,
-               self.automaticallyUpdatesPreviewOrientation {
-                if previewConnection.isVideoOrientationSupported &&
-                    previewConnection.videoOrientation != orientation {
-                    previewConnection.videoOrientation = orientation
-                    didChangeOrientation = true
-                }
-            }
-            
-            if let videoOutput = self._videoOutput,
-               let videoConnection = videoOutput.connection(with: AVMediaType.video) {
-                if videoConnection.isVideoOrientationSupported &&
-                    videoConnection.videoOrientation != orientation {
-                    videoConnection.videoOrientation = orientation
-                    didChangeOrientation = true
-                }
-            }
-            
-            if let movieOutput = self._movieFileOutput,
-               let videoConnection = movieOutput.connection(with: .video) {
-                if videoConnection.isVideoOrientationSupported &&
-                    videoConnection.videoOrientation != orientation {
-                    videoConnection.videoOrientation = orientation
-                    didChangeOrientation = true
-                }
-            }
-            
-            if let photoOutput = self._photoOutput,
-               let photoConnection = photoOutput.connection(with: AVMediaType.video) {
-                if photoConnection.isVideoOrientationSupported &&
-                    photoConnection.videoOrientation != orientation {
-                    photoConnection.videoOrientation = orientation
-                    didChangeOrientation = true
-                }
-            }
-            
-            if didChangeOrientation == true {
-                self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
-            }
-            
-            completion?()
+        self.deviceOrientation =
+        AVCaptureVideoOrientation
+            .avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+        
+        guard let orientation = self.deviceOrientation else {
+            return nil
         }
+        
+        var didChangeOrientation = false
+        if let videoOutput = self._videoOutput,
+           let videoConnection = videoOutput.connection(with: AVMediaType.video) {
+            if videoConnection.isVideoOrientationSupported &&
+                videoConnection.videoOrientation != orientation {
+                videoConnection.videoOrientation = orientation
+                didChangeOrientation = true
+            }
+        }
+        
+        if let movieOutput = self._movieFileOutput,
+           let videoConnection = movieOutput.connection(with: .video) {
+            if videoConnection.isVideoOrientationSupported &&
+                videoConnection.videoOrientation != orientation {
+                videoConnection.videoOrientation = orientation
+                didChangeOrientation = true
+            }
+        }
+        
+        if let photoOutput = self._photoOutput,
+           let photoConnection = photoOutput.connection(with: AVMediaType.video) {
+            if photoConnection.isVideoOrientationSupported &&
+                photoConnection.videoOrientation != orientation {
+                photoConnection.videoOrientation = orientation
+                didChangeOrientation = true
+            }
+        }
+        
+        return (didChangeOrientation, orientation)
     }
     
     internal func updateVideoOutputSettings() {
@@ -2306,14 +2266,14 @@ extension NextLevel {
                        format: AVCaptureDevice.Format,
                        preferredFrameRate: CMTimeScale,
                        zoomScale: CGFloat) {
-       
+        
+        self._isReadyForSynchronousOrientationUpdates = false
+        
         self.executeClosureAsyncOnSessionQueueIfNecessary {
             do {
                 self.devicePosition = device.position
                 self._requestedDevice = device
                 self.configureSessionDevices()
-                
-                self._isReadyForSynchronousOrientationUpdates = false
                 
                 try device.lockForConfiguration()
                 
@@ -2339,16 +2299,46 @@ extension NextLevel {
                 
                 device.unlockForConfiguration()
                 
-                self.updateVideoOrientation { [weak self] in
+                let result = self.updateVideoOrientation()
+                self.runOnMainThreadIfNeeded { [weak self] in
                     guard let self else {
                         return
                     }
+                    
+                    let callDelegate = result?.didChangeOrientation ?? false
+                    self.updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: callDelegate)
                     
                     self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
                 }
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
             }
+        }
+    }
+    
+    private func updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: Bool) {
+        
+        assert(Thread.isMainThread, "The preview layer orientation update must be executed only on the main thread.")
+        
+        guard self.automaticallyUpdatesPreviewOrientation else {
+            if shouldCallDelegate {
+                self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
+            }
+            return
+        }
+        
+        
+        var didChangeOrientation = false
+        if let previewConnection = self.previewLayer.connection {
+            if previewConnection.isVideoOrientationSupported &&
+                previewConnection.videoOrientation != self.deviceOrientation {
+                previewConnection.videoOrientation = self.deviceOrientation!
+                didChangeOrientation = true
+            }
+        }
+        
+        if didChangeOrientation || shouldCallDelegate {
+            self.deviceDelegate?.nextLevel(self, didChangeDeviceOrientation: self.deviceOrientation!)
         }
     }
     
@@ -3315,13 +3305,21 @@ extension NextLevel {
     
     @objc internal func deviceOrientationDidChange(_ notification: NSNotification) {
         if self.automaticallyUpdatesDeviceOrientation {
+            func adjustOrientation() {
+                let result = self.updateVideoOrientation()
+                let callDelegate = result?.didChangeOrientation ?? false
+                self.runOnMainThreadIfNeeded { [weak self] in
+                    self?.updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: callDelegate)
+                }
+            }
+            
             if self._isReadyForSynchronousOrientationUpdates && !self._wasBackgrounded {
                 self._sessionQueue.sync {
-                    self.updateVideoOrientation()
+                    adjustOrientation()
                 }
             } else {
                 self._sessionQueue.async {
-                    self.updateVideoOrientation()
+                    adjustOrientation()
                 }
             }
         }
