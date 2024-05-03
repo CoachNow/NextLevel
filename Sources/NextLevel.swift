@@ -584,9 +584,7 @@ extension NextLevel {
         guard self.authorizationStatusForCurrentCaptureMode() == .authorized else {
             throw NextLevelError.authorization
         }
-        
-//        initiateDeviceOrientationIfNeeded()
-        
+                
         if self.captureMode == .arKit {
             #if USE_ARKIT
             if #available(iOS 11.0, *) {
@@ -2264,7 +2262,7 @@ extension NextLevel {
     
     public func update(device: AVCaptureDevice,
                        format: AVCaptureDevice.Format,
-                       preferredFrameRate: CMTimeScale,
+                       preferredFrameRate: Int32,
                        zoomScale: CGFloat) {
         
         self._isReadyForSynchronousOrientationUpdates = false
@@ -2279,6 +2277,10 @@ extension NextLevel {
                 
                 if device.activeFormat != format {
                     device.activeFormat = format
+                } else {
+                    print("Next Level: Active formats are the same.")
+                    print(device.activeFormat)
+                    print(format)
                 }
                 
                 device.isSubjectAreaChangeMonitoringEnabled = false
@@ -2293,9 +2295,15 @@ extension NextLevel {
                 
                 device.videoZoomFactor = zoomScale
                 
-                let fps: CMTime = CMTimeMake(value: 1, timescale: preferredFrameRate)
-                device.activeVideoMaxFrameDuration = fps
-                device.activeVideoMinFrameDuration = fps
+                let frameRate = Float64(preferredFrameRate)
+                if let range = format.videoSupportedFrameRateRanges.first,
+                   range.minFrameRate...range.maxFrameRate ~= frameRate {
+                    let fps: CMTime = CMTimeMake(value: 1, timescale: preferredFrameRate)
+                    device.activeVideoMaxFrameDuration = fps
+                    device.activeVideoMinFrameDuration = fps
+                } else {
+                    print("Next Level: Unfupported frame rate detected.")
+                }
                 
                 device.unlockForConfiguration()
                 
@@ -2310,6 +2318,7 @@ extension NextLevel {
                     
                     self.deviceDelegate?.nextLevel(self, didChangeDevice: device)
                 }
+                
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
             }
@@ -2318,7 +2327,7 @@ extension NextLevel {
     
     private func updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: Bool) {
         
-        assert(Thread.isMainThread, "The preview layer orientation update must be executed only on the main thread.")
+        assert(Thread.isMainThread, "Next Level: The preview layer orientation update must be executed only on the main thread.")
         
         guard self.automaticallyUpdatesPreviewOrientation else {
             if shouldCallDelegate {
