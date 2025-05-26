@@ -211,6 +211,7 @@ public enum NextLevelError: Error, CustomStringConvertible {
     case fileExists
     case nothingRecorded
     case notReadyToRecord
+    case custom(message: String)
     
     public var description: String {
         get {
@@ -229,6 +230,8 @@ public enum NextLevelError: Error, CustomStringConvertible {
                 return "Nothing recorded"
             case .notReadyToRecord:
                 return "NextLevel is not ready to record"
+            case .custom(let message):
+                return message
             }
         }
     }

@@ -545,60 +545,68 @@ extension NextLevelSession {
     ///
     /// - Parameter completionHandler: Handler for when a clip is finalized or finalization fails
     public func endClip(completionHandler: NextLevelSessionEndClipCompletionHandler?) {
-        self.executeClosureSyncOnSessionQueueIfNecessary {
-            self._audioQueue.sync {
-                if self._currentClipHasStarted {
-                    self._currentClipHasStarted = false
-                    
-                    if let writer = self._writer {
-                        if !self.currentClipHasAudio && !self.currentClipHasVideo {
-                            writer.cancelWriting()
-                            
-                            self.removeFile(fileUrl: writer.outputURL)
-                            self.destroyWriter()
-
-                            if let completionHandler = completionHandler {
-                                DispatchQueue.main.async {
-                                    completionHandler(nil, nil)
-                                }
-                            }
-                        } else {
-                            //print("ending session \(CMTimeGetSeconds(self._currentClipDuration))")
-                            writer.endSession(atSourceTime: CMTimeAdd(self._currentClipDuration, self._startTimestamp))
-                            writer.finishWriting(completionHandler: {
-                                self.executeClosureSyncOnSessionQueueIfNecessary {
-                                    var clip: NextLevelClip? = nil
-                                    let url = writer.outputURL
-                                    let error = writer.error
-                                    
-                                    if error == nil {
-                                        clip = NextLevelClip(url: url, infoDict: nil)
-                                        if let clip = clip {
-                                            self.add(clip: clip)
-                                        }
-                                    }
-                                    
-                                    self.destroyWriter()
-                                    
-                                    if let completionHandler = completionHandler {
-                                        DispatchQueue.main.async {
-                                            completionHandler(clip, error)
-                                        }
-                                    }
-                                }
-                            })
-                            return
-                        }
-                    }
-                }
-                
-                if let completionHandler = completionHandler {
-                    DispatchQueue.main.async {
-                        completionHandler(nil, NextLevelError.notReadyToRecord)
-                    }
-                }
+        func callCompletion(with error: Error?, clip: NextLevelClip?) {
+            guard let completion = completionHandler else {
+                return
+            }
+            
+            DispatchQueue.main.async {
+                completion(clip, error)
             }
         }
+        
+        self._audioQueue.sync { [weak self] in
+            guard let self else {
+                let message = "NextLevelSession class has been unexpectedly deallocated."
+                let error = NextLevelError.custom(message: message)
+                callCompletion(with: error, clip: nil)
+                return
+            }
+            
+            guard self._currentClipHasStarted else {
+                callCompletion(with: NextLevelError.notReadyToRecord, clip: nil)
+                return
+            }
+            
+            self._currentClipHasStarted = false
+            self.finalizeWriter { result in
+                callCompletion(with: result.error, clip: result.clip)
+            }
+        }
+    }
+    
+    private func finalizeWriter(completion: @escaping ((error: Error?, clip: NextLevelClip?)) -> Void) {
+        guard let writer = self._writer else {
+            completion((error: nil, clip: nil))
+            return
+        }
+        
+        guard self.currentClipHasVideo && self.currentClipHasAudio else {
+            writer.cancelWriting()
+            
+            self.removeFile(fileUrl: writer.outputURL)
+            self.destroyWriter()
+            completion((error: nil, clip: nil))
+            return
+        }
+        
+        let sessionEndTime = CMTimeAdd(self._currentClipDuration, self._startTimestamp)
+        writer.endSession(atSourceTime: sessionEndTime)
+        writer.finishWriting(completionHandler: {
+            var clip: NextLevelClip? = nil
+            let error = writer.error
+            
+            if error == nil {
+                let url = writer.outputURL
+                clip = NextLevelClip(url: url, infoDict: nil)
+                if let clip = clip {
+                    self.add(clip: clip)
+                }
+            }
+            
+            self.destroyWriter()
+            completion((error: error, clip: clip))
+        })
     }
 }
 
@@ -876,5 +884,4 @@ extension NextLevelSession {
             self._sessionQueue.sync(execute: closure)
         }
     }
-    
 }
