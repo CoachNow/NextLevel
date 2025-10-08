@@ -11,6 +11,8 @@ import AudioToolbox
 import AVFoundation
 
 final class EdufiiAudioConfiguration: NextLevelAudioConfiguration {
+    private(set) var isBluetoothHFPConnected: Bool = false
+    
     fileprivate struct AudioFormatCache {
         static var tagsCache = [String: [AudioChannelLayoutTag]]()
         static var channelsCache = [AudioFormatID: [UInt32]]()
@@ -152,55 +154,81 @@ final class EdufiiAudioConfiguration: NextLevelAudioConfiguration {
     public override func avcaptureSettingsDictionary(sampleBuffer: CMSampleBuffer? = nil,
                                                      pixelBuffer: CVPixelBuffer? = nil) -> [String: Any]? {
         if let opts = self.options, opts.count > 0 {
-            return opts
+            let session = AVAudioSession.sharedInstance()
+            let isBluetoothHFP = session.currentRoute.inputs.contains {
+                $0.portType == .bluetoothHFP
+            }
+            
+            if self.isBluetoothHFPConnected == isBluetoothHFP {
+                return opts
+            }
         }
         
-        var config: [String : Any] = [AVEncoderBitRateKey : NSNumber(integerLiteral: self.bitRate),
-                                      AVFormatIDKey: NSNumber(value: self.format as UInt32)]
+        let session = AVAudioSession.sharedInstance()
+        self.isBluetoothHFPConnected = session.currentRoute.inputs.contains {
+            $0.portType == .bluetoothHFP
+        }
         
-        if let sampleBuffer = sampleBuffer,
-           let formatDescription: CMFormatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+        var config: [String : Any] = [:]
+        
+        if self.isBluetoothHFPConnected {
+            print("⚠️ Detected Bluetooth HFP input — using PCM for compatibility")
+            config = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsFloatKey: false
+            ]
+        } else {
+            config = [AVEncoderBitRateKey : NSNumber(integerLiteral: self.bitRate),
+                             AVFormatIDKey: NSNumber(value: self.format as UInt32)]
             
-            setSampleRate(formatDescription: formatDescription, config: &config)
-            setChannelsCount(formatDescription: formatDescription, config: &config)
-            
-            var layoutSize: Int = 0
-            if let currentChannelLayout = CMAudioFormatDescriptionGetChannelLayout(formatDescription, sizeOut: &layoutSize),
-               layoutSize > 0 {
-                let channelsCountToUse = (config[AVNumberOfChannelsKey] as? NSNumber)?.uint32Value ?? 0
+            if let sampleBuffer = sampleBuffer,
+               let formatDescription: CMFormatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
                 
-                let layoutTag = currentChannelLayout.pointee.mChannelLayoutTag
-                // Safety check for UseChannelDescriptions with no descriptions
-                if layoutTag == kAudioChannelLayoutTag_UseChannelDescriptions &&
-                   currentChannelLayout.pointee.mNumberChannelDescriptions == 0 {
-                    print("⚠️ LayoutTag is 'UseChannelDescriptions' but no actual descriptions present")
-                    self.channelsCount = 1
-                    config[AVNumberOfChannelsKey] = NSNumber(value: 1)
-                    config[AVChannelLayoutKey] = monoChannelLayoutData()
-                    self.options = config
-                    return config
-                }
-                if isChannelLayoutValidForFormat(layoutTag,
-                                                 channels: channelsCountToUse,
-                                                 format: self.format) {
-                    let data = Data(bytes: currentChannelLayout, count: layoutSize)
-                    config[AVChannelLayoutKey] = data
+                setSampleRate(formatDescription: formatDescription, config: &config)
+                setChannelsCount(formatDescription: formatDescription, config: &config)
+                
+                var layoutSize: Int = 0
+                if let currentChannelLayout = CMAudioFormatDescriptionGetChannelLayout(formatDescription, sizeOut: &layoutSize),
+                   layoutSize > 0 {
+                    let channelsCountToUse = (config[AVNumberOfChannelsKey] as? NSNumber)?.uint32Value ?? 0
+                    
+                    let layoutTag = currentChannelLayout.pointee.mChannelLayoutTag
+                    // Safety check for UseChannelDescriptions with no descriptions
+                    if layoutTag == kAudioChannelLayoutTag_UseChannelDescriptions &&
+                       currentChannelLayout.pointee.mNumberChannelDescriptions == 0 {
+                        print("⚠️ LayoutTag is 'UseChannelDescriptions' but no actual descriptions present")
+                        self.channelsCount = 1
+                        config[AVNumberOfChannelsKey] = NSNumber(value: 1)
+                        config[AVChannelLayoutKey] = monoChannelLayoutData()
+                        self.options = config
+                        return config
+                    }
+                    if isChannelLayoutValidForFormat(layoutTag,
+                                                     channels: channelsCountToUse,
+                                                     format: self.format) {
+                        let data = Data(bytes: currentChannelLayout, count: layoutSize)
+                        config[AVChannelLayoutKey] = data
+                    } else {
+                        // invalid layout for chosen format -> log and force mono (since you always want mono)
+                        print("🛡 Channel layout not compatible with format \(self.format). Forcing mono or fallback to PCM")
+                        fallbackToMono(&config)
+                        // or, if you want: you could immediately return PCM settings here
+                        // return pcmSettings(sampleRate: config[AVSampleRateKey] as? Double ?? 24000)
+                    }
                 } else {
-                    // invalid layout for chosen format -> log and force mono (since you always want mono)
-                    print("🛡 Channel layout not compatible with format \(self.format). Forcing mono or fallback to PCM")
+                    // sampleBuffer has no channel layout — for AAC it's better to explicitly set mono layout
                     fallbackToMono(&config)
-                    // or, if you want: you could immediately return PCM settings here
-                    // return pcmSettings(sampleRate: config[AVSampleRateKey] as? Double ?? 24000)
                 }
             } else {
-                // sampleBuffer has no channel layout — for AAC it's better to explicitly set mono layout
+                // sampleBuffer or formatDescription is nil, fallback to mono
+                setSampleRate(formatDescription: nil, config: &config)
+                setChannelsCount(formatDescription: nil, config: &config)
                 fallbackToMono(&config)
             }
-        } else {
-            // sampleBuffer or formatDescription is nil, fallback to mono
-            setSampleRate(formatDescription: nil, config: &config)
-            setChannelsCount(formatDescription: nil, config: &config)
-            fallbackToMono(&config)
         }
         
         // Assert required audio config keys are present
