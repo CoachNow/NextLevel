@@ -2866,19 +2866,17 @@ extension NextLevel {
     
     internal func handleAudioOutput(sampleBuffer: CMSampleBuffer, session: NextLevelSession) {
         if session.isAudioSetup == false {
-//            let recommendedSettings =
-//            self._audioOutput?.recommendedAudioSettingsForAssetWriter(writingTo: session.fileType)
-//            self.audioConfiguration.options = recommendedSettings
-            
             if let settings = self.audioConfiguration.avcaptureSettingsDictionary(sampleBuffer: sampleBuffer),
-                let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                if !session.setupAudio(withSettings: settings, configuration: self.audioConfiguration, formatDescription: formatDescription) {
-                    print("NextLevel, could not setup audio session")
+               let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                let isSetup: Bool = session.setupAudio(withSettings: settings,
+                                                       configuration: self.audioConfiguration,
+                                                       formatDescription: formatDescription)
+                
+                if isSetup {
+                    DispatchQueue.main.async {
+                        self.videoDelegate?.nextLevel(self, didSetupAudioInSession: session)
+                    }
                 }
-            }
-            
-            DispatchQueue.main.async {
-                self.videoDelegate?.nextLevel(self, didSetupAudioInSession: session)
             }
         }
         
