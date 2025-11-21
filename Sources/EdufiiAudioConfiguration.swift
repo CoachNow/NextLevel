@@ -11,24 +11,33 @@ import AudioToolbox
 import AVFoundation
 
 final class EdufiiAudioConfiguration: NextLevelAudioConfiguration {
-    /// Универсальный сборщик настроек для AVAssetWriterInput (audio)
-    ///
-    /// - Возвращает:
-    ///   - AAC (kAudioFormatMPEG4AAC) при "нормальном" layout (1–2 канала, без exotic tag)
-    ///   - PCM (kAudioFormatLinearPCM) при экзотическом layout или >2 каналов
-    ///
-    /// - Важно:
-    ///   - Не ставит AVChannelLayoutKey, чтобы не ловить крэши из-за несоответствия.
-    private func makeAudioOutputSettings(from sampleBuffer: CMSampleBuffer) -> [String: Any]? {
-        // format description
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else {
-            print("⚠️ makeAudioOutputSettings: no formatDesc")
+    private func printIfDebug(_ string: String) {
+#if DEBUG
+        print(string)
+#endif
+    }
+    
+    // Validates the input and returns sample rate and channel count
+    // only if both values are greater than zero.
+    private func extractAudioFormatInfo(from sampleBuffer: CMSampleBuffer)
+    -> (formatDescr: CMFormatDescription, sampleRate: Float64, channelsCount: Int)? {
+        guard CMSampleBufferIsValid(sampleBuffer) else {
+            printIfDebug("⚠️ extractAudioFormatInfo: sampleBuffer is not valid")
             return nil
         }
         
-        // StreamBasicDescription
+        guard CMSampleBufferGetNumSamples(sampleBuffer) > 0 else {
+            printIfDebug("⚠️ extractAudioFormatInfo: sampleBuffer has no samples")
+            return nil
+        }
+
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            printIfDebug("⚠️ makeAudioOutputSettings: no formatDesc")
+            return nil
+        }
+        
         guard let sbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
-            print("⚠️ makeAudioOutputSettings: no SBD")
+            printIfDebug("⚠️ makeAudioOutputSettings: no SBD")
             return nil
         }
         
@@ -37,13 +46,21 @@ final class EdufiiAudioConfiguration: NextLevelAudioConfiguration {
         let channels = Int(sbd.mChannelsPerFrame)
         
         guard sampleRate > 0, channels > 0 else {
-            print("⚠️ makeAudioOutputSettings: invalid sampleRate (\(sampleRate)) or channels (\(channels))")
+            printIfDebug("⚠️ makeAudioOutputSettings: invalid sampleRate (\(sampleRate)) or channels (\(channels))")
             return nil
         }
         
-        // Channel layout (can be nil)
+        return (formatDesc, sampleRate, channels)
+    }
+    
+    private func shouldUsePCMConfig(formatDescription: CMFormatDescription, channelsCount: Int) -> Bool {
+        guard channelsCount <= 2 else {
+            return true
+        }
+        
         var layoutSize: Int = 0
-        let layoutPtr = CMAudioFormatDescriptionGetChannelLayout(formatDesc, sizeOut: &layoutSize)
+        let layoutPtr =
+        CMAudioFormatDescriptionGetChannelLayout(formatDescription, sizeOut: &layoutSize)
         var layoutTag: AudioChannelLayoutTag? = nil
         if let layoutPtr {
             layoutTag = layoutPtr.pointee.mChannelLayoutTag
@@ -51,60 +68,83 @@ final class EdufiiAudioConfiguration: NextLevelAudioConfiguration {
         
         let tag = layoutTag ?? kAudioChannelLayoutTag_Unknown
         
-        // Exotic layout = UseChannelDescriptions / UseChannelBitmap или >2 каналов
         let isExoticLayout =
-        (channels > 2 ||
-         tag == kAudioChannelLayoutTag_UseChannelDescriptions ||
+        (tag == kAudioChannelLayoutTag_UseChannelDescriptions ||
          tag == kAudioChannelLayoutTag_UseChannelBitmap ||
          tag == kAudioChannelLayoutTag_Unknown)
         
-        // MARK: An attempt to congigure AAC
-        if !isExoticLayout {
-            var settings: [String: Any] = [:]
-            
-            settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
-            settings[AVSampleRateKey] = sampleRate
-            settings[AVNumberOfChannelsKey] = channels
-            
-            // VBR Bitraite
-            settings[AVEncoderBitRateStrategyKey] = AVAudioBitRateStrategy_VariableConstrained
-            settings[AVEncoderAudioQualityKey] = AVAudioQuality.high.rawValue
-            
-            print("🎧 makeAudioOutputSettings: using AAC, sr=\(sampleRate), ch=\(channels), tag=\(tag)")
-            return settings
-        }
+        return isExoticLayout
+    }
+    
+    private func aacSettings(sampleRate: Float64, channels: Int) -> [String: Any] {
+        var settings: [String: Any] = [:]
         
-        // MARK: PCM fallback (exotic layout / multichanel)
-        var pcmSettings: [String: Any] = [:]
-        pcmSettings[AVFormatIDKey] = kAudioFormatLinearPCM
-        pcmSettings[AVSampleRateKey] = sampleRate
-        pcmSettings[AVNumberOfChannelsKey] = channels
+        settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
+        settings[AVSampleRateKey] = sampleRate
+        settings[AVNumberOfChannelsKey] = channels
+        
+        // VBR Bitraite
+        settings[AVEncoderBitRateStrategyKey] = AVAudioBitRateStrategy_VariableConstrained
+        settings[AVEncoderAudioQualityKey] = AVAudioQuality.high.rawValue
+        
+        return settings
+    }
+    
+    private func pcmSettings(sampleRate: Float64, channels: Int) -> [String: Any] {
+        var settings: [String: Any] = [:]
+        settings[AVFormatIDKey] = kAudioFormatLinearPCM
+        settings[AVSampleRateKey] = sampleRate
+        settings[AVNumberOfChannelsKey] = channels
         
         // 16-bit signed integer, little-endian, interleaved
-        pcmSettings[AVLinearPCMBitDepthKey] = 16
-        pcmSettings[AVLinearPCMIsNonInterleaved] = false
-        pcmSettings[AVLinearPCMIsFloatKey] = false
-        pcmSettings[AVLinearPCMIsBigEndianKey] = false
+        settings[AVLinearPCMBitDepthKey] = 16
+        settings[AVLinearPCMIsNonInterleaved] = false
+        settings[AVLinearPCMIsFloatKey] = false
+        settings[AVLinearPCMIsBigEndianKey] = false
         
-        print("🎧 makeAudioOutputSettings: using PCM, sr=\(sampleRate), ch=\(channels), tag=\(tag)")
-        return pcmSettings
+        return settings
+    }
+    
+    /// Universal configuration builder for AVAssetWriterInput (audio)
+    ///
+    /// - Returns:
+    ///   - AAC (kAudioFormatMPEG4AAC) for "normal" layouts (1–2 channels, without exotic tags)
+    ///   - PCM (kAudioFormatLinearPCM) for exotic layouts or more than 2 channels
+    ///
+    /// - Important:
+    ///   - Does not set AVChannelLayoutKey to avoid crashes due to mismatched layouts.
+    private func makeAudioOutputSettings(from sampleBuffer: CMSampleBuffer) -> [String: Any]? {
+        guard let result = extractAudioFormatInfo(from: sampleBuffer) else {
+            return nil
+        }
+        
+        let sampleRate = result.sampleRate
+        let channels = result.channelsCount
+        
+        let usePCM =
+        shouldUsePCMConfig(formatDescription: result.formatDescr, channelsCount: channels)
+        
+        let settings = usePCM
+        ? pcmSettings(sampleRate: sampleRate, channels: channels)
+        : aacSettings(sampleRate: sampleRate, channels: channels)
+        
+#if DEBUG
+        let usedFormat: String = usePCM ? "PCM" : "AAC"
+        print("🔔 Final audio settings: using \(usedFormat), \(settings)")
+#endif
+        
+        return settings
     }
     
     public override func avcaptureSettingsDictionary(sampleBuffer: CMSampleBuffer? = nil,
                                                      pixelBuffer: CVPixelBuffer? = nil) -> [String: Any]? {
-        if let settings = self.options, settings.count > 0 {
-            return settings
-        }
-        
         guard let sampleBuffer,
                 let settings = makeAudioOutputSettings(from: sampleBuffer) else {
             return nil
         }
         
         self.options = settings
- 
-        print("🔔 Final audio settings: \(settings)")
-    
+     
         return settings
     }
 }
