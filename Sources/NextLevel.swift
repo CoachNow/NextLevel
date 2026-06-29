@@ -386,7 +386,13 @@ public class NextLevel: NSObject {
             return self._recordingSession
         }
     }
-    
+
+    /// Edufii (multicam head-alignment): set this BEFORE calling record(); it's applied to the
+    /// recording session when recording begins, so frames captured before this instant are dropped
+    /// and the clip starts on the first frame at or after it. Timestamp is in the capture host-time
+    /// domain (same as sample-buffer PTS). nil = no gating (default). Clear it after the take.
+    public var recordingStartTime: CMTime?
+
     /// Shared Core Image rendering context.
     public var sharedCIContext: CIContext? {
         set {
@@ -2597,7 +2603,8 @@ extension NextLevel {
     public func record() {
         self.executeClosureSyncOnSessionQueueIfNecessary {
             self._recording = true
-            if let _ = self._recordingSession {
+            if let session = self._recordingSession {
+                session.recordingStartTime = self.recordingStartTime  // Edufii: apply the multicam start-gate to this take
                 self.beginRecordingNewClipIfNecessary()
             }
         }
