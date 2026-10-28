@@ -244,6 +244,26 @@ private let NextLevelDepthDataQueueIdentifier = "engineering.NextLevel.DepthData
 #endif
 private let NextLevelRequiredMinimumStorageSpaceInBytes: UInt64 = 49999872 // ~47 MB
 
+/// Tracks the latest of rapidly repeated device updates (gesture driven), so session queue blocks
+/// superseded by a newer request of the same kind skip the expensive device lock.
+internal final class NextLevelLatestRequest {
+    private let _lock = NSLock()
+    private var _currentId = 0
+
+    func next() -> Int {
+        self._lock.lock()
+        defer { self._lock.unlock() }
+        self._currentId += 1
+        return self._currentId
+    }
+
+    func isLatest(_ id: Int) -> Bool {
+        self._lock.lock()
+        defer { self._lock.unlock() }
+        return id == self._currentId
+    }
+}
+
 // MARK: - NextLevel state
 
 /// ⬆️ NextLevel, Rad Media Capture in Swift (http://nextlevel.engineering)
@@ -455,6 +475,10 @@ public class NextLevel: NSObject {
     
     internal var _isReadyForSynchronousOrientationUpdates = false
     @objc internal var _wasBackgrounded = false
+
+    internal let _zoomFactorRequest = NextLevelLatestRequest()
+    internal let _exposureDurationRequest = NextLevelLatestRequest()
+    internal let _exposureISORequest = NextLevelLatestRequest()
     // MARK: - singleton
     
     /// Method for providing a NextLevel singleton. This isn't required for use.
@@ -1898,8 +1922,11 @@ extension NextLevel {
     /// - Parameter duration: The exposure duration in seconds.
     public func expose(withDuration duration: Double) {
         // Async on the session queue so a stuck device lock never blocks the main thread.
+        // Only the latest request is applied, so gesture-rate calls do not pile up device locks.
+        let requestId = self._exposureDurationRequest.next()
         self.executeClosureAsyncOnSessionQueueIfNecessary {
-            guard let device = self._currentDevice,
+            guard self._exposureDurationRequest.isLatest(requestId),
+                  let device = self._currentDevice,
                   device.isExposureModeSupported(.custom),
                     !device.isAdjustingExposure
             else {
@@ -1930,8 +1957,11 @@ extension NextLevel {
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
         // Async on the session queue so a stuck device lock never blocks the main thread.
+        // Only the latest request is applied, so gesture-rate calls do not pile up device locks.
+        let requestId = self._exposureISORequest.next()
         self.executeClosureAsyncOnSessionQueueIfNecessary {
-            guard let device = self._currentDevice,
+            guard self._exposureISORequest.isLatest(requestId),
+                  let device = self._currentDevice,
                   device.isExposureModeSupported(.custom),
                   !device.isAdjustingExposure
             else {
@@ -2462,7 +2492,13 @@ extension NextLevel {
             return 1.0 // prefer 1.0 instead of using an optional
         }
         set {
+            // Only the latest request is applied, so pinch-rate calls do not pile up device locks.
+            let requestId = self._zoomFactorRequest.next()
             self.executeClosureAsyncOnSessionQueueIfNecessary {
+                guard self._zoomFactorRequest.isLatest(requestId) else {
+                    return
+                }
+
                 if let device = self._currentDevice {
                     do {
                         try device.lockForConfiguration()
