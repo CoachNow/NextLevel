@@ -1750,36 +1750,39 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest.
     public func focusExposeAndAdjustWhiteBalance(atAdjustedPoint adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice
-            else {
-                return
-        }
+        // Async on the session queue so a stuck device lock never blocks the main thread.
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device = self._currentDevice
+                else {
+                    return
+            }
         
-        do {
-            try device.lockForConfiguration()
+            do {
+                try device.lockForConfiguration()
             
-            let focusMode: AVCaptureDevice.FocusMode = .autoFocus
-            let exposureMode: AVCaptureDevice.ExposureMode = .continuousAutoExposure
-            let whiteBalanceMode: AVCaptureDevice.WhiteBalanceMode = .continuousAutoWhiteBalance
+                let focusMode: AVCaptureDevice.FocusMode = .autoFocus
+                let exposureMode: AVCaptureDevice.ExposureMode = .continuousAutoExposure
+                let whiteBalanceMode: AVCaptureDevice.WhiteBalanceMode = .continuousAutoWhiteBalance
             
-            if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(focusMode) {
-                device.focusPointOfInterest = adjustedPoint
-                device.focusMode = focusMode
-            }
+                if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(focusMode) {
+                    device.focusPointOfInterest = adjustedPoint
+                    device.focusMode = focusMode
+                }
             
-            if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(exposureMode) {
-                device.exposurePointOfInterest = adjustedPoint
-                device.exposureMode = exposureMode
-            }
+                if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(exposureMode) {
+                    device.exposurePointOfInterest = adjustedPoint
+                    device.exposureMode = exposureMode
+                }
             
-            if device.isWhiteBalanceModeSupported(whiteBalanceMode) {
-                device.whiteBalanceMode = whiteBalanceMode
-            }
+                if device.isWhiteBalanceModeSupported(whiteBalanceMode) {
+                    device.whiteBalanceMode = whiteBalanceMode
+                }
                         
-            device.unlockForConfiguration()
-        }
-        catch {
-            print("NextLevel, focusExposeAndAdjustWhiteBalance failed to lock device for configuration")
+                device.unlockForConfiguration()
+            }
+            catch {
+                print("NextLevel, focusExposeAndAdjustWhiteBalance failed to lock device for configuration")
+            }
         }
     }
     
@@ -1839,22 +1842,25 @@ extension NextLevel {
             return .locked
         }
         set {
-            guard let device = self._currentDevice,
-                device.exposureMode != newValue,
-                device.isExposureModeSupported(newValue)
-                else {
-                    return
-            }
+            // Async on the session queue so a stuck device lock never blocks the main thread.
+            self.executeClosureAsyncOnSessionQueueIfNecessary {
+                guard let device = self._currentDevice,
+                    device.exposureMode != newValue,
+                    device.isExposureModeSupported(newValue)
+                    else {
+                        return
+                }
             
-            do {
-                try device.lockForConfiguration()
-                device.exposureMode = newValue
-                self.adjustWhiteBalanceForExposureMode(exposureMode: newValue)
+                do {
+                    try device.lockForConfiguration()
+                    device.exposureMode = newValue
+                    self.adjustWhiteBalanceForExposureMode(exposureMode: newValue)
                 
-                device.unlockForConfiguration()
-            }
-            catch {
-                print("NextLevel, exposureMode failed to lock device for configuration")
+                    device.unlockForConfiguration()
+                }
+                catch {
+                    print("NextLevel, exposureMode failed to lock device for configuration")
+                }
             }
         }
     }
@@ -1863,24 +1869,27 @@ extension NextLevel {
     ///
     /// - Parameter adjustedPoint: The point of interest for exposure.
     public func exposeAtAdjustedPointOfInterest(adjustedPoint: CGPoint) {
-        guard let device = self._currentDevice
-            else {
-                return
-        }
-        
-        do {
-            try device.lockForConfiguration()
-            
-            if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.continuousAutoExposure) {
-                let exposureMode = device.exposureMode
-                device.exposurePointOfInterest = adjustedPoint
-                device.exposureMode = exposureMode
+        // Async on the session queue so a stuck device lock never blocks the main thread.
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device = self._currentDevice
+                else {
+                    return
             }
+        
+            do {
+                try device.lockForConfiguration()
             
-            device.unlockForConfiguration()
-        }
-        catch {
-            print("NextLevel, exposeAtAdjustedPointOfInterest failed to lock device for configuration")
+                if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.continuousAutoExposure) {
+                    let exposureMode = device.exposureMode
+                    device.exposurePointOfInterest = adjustedPoint
+                    device.exposureMode = exposureMode
+                }
+            
+                device.unlockForConfiguration()
+            }
+            catch {
+                print("NextLevel, exposeAtAdjustedPointOfInterest failed to lock device for configuration")
+            }
         }
     }
     
@@ -1888,28 +1897,31 @@ extension NextLevel {
     ///
     /// - Parameter duration: The exposure duration in seconds.
     public func expose(withDuration duration: Double) {
-        guard let device = self._currentDevice,
-              device.isExposureModeSupported(.custom),
-                !device.isAdjustingExposure
-        else {
-            return
-        }
-
-        var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
-        if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
-            durationTime = device.activeFormat.minExposureDuration
-        } else if (CMTimeCompare(durationTime, device.activeFormat.maxExposureDuration) > 0) {
-            durationTime = device.activeFormat.maxExposureDuration
-        }
-        
-        do {
-            try device.lockForConfiguration()
-            device.setExposureModeCustom(duration: durationTime,
-                                         iso: AVCaptureDevice.currentISO) { [weak device] _ in
-                device?.unlockForConfiguration()
+        // Async on the session queue so a stuck device lock never blocks the main thread.
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device = self._currentDevice,
+                  device.isExposureModeSupported(.custom),
+                    !device.isAdjustingExposure
+            else {
+                return
             }
-        } catch {
-            print("NextLevel, setExposureModeCustom failed to lock device for configuration")
+
+            var durationTime = CMTime(seconds: duration, preferredTimescale: 1000*1000*1000)
+            if (CMTimeCompare(durationTime, device.activeFormat.minExposureDuration) < 0) {
+                durationTime = device.activeFormat.minExposureDuration
+            } else if (CMTimeCompare(durationTime, device.activeFormat.maxExposureDuration) > 0) {
+                durationTime = device.activeFormat.maxExposureDuration
+            }
+        
+            do {
+                try device.lockForConfiguration()
+                device.setExposureModeCustom(duration: durationTime,
+                                             iso: AVCaptureDevice.currentISO) { [weak device] _ in
+                    device?.unlockForConfiguration()
+                }
+            } catch {
+                print("NextLevel, setExposureModeCustom failed to lock device for configuration")
+            }
         }
     }
     
@@ -1917,24 +1929,27 @@ extension NextLevel {
     ///
     /// - Parameter iso: The exposure ISO value.
     public func expose(withISO iso: Float) {
-        guard let device = self._currentDevice,
-              device.isExposureModeSupported(.custom),
-              !device.isAdjustingExposure
-        else {
-            return
-        }
-        
-        let newISO = iso.clamped(to: device.activeFormat.minISO...device.activeFormat.maxISO)
-        
-        do {
-            try device.lockForConfiguration()
-            
-            device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration,
-                                         iso: newISO) { [weak device] _ in
-                device?.unlockForConfiguration()
+        // Async on the session queue so a stuck device lock never blocks the main thread.
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            guard let device = self._currentDevice,
+                  device.isExposureModeSupported(.custom),
+                  !device.isAdjustingExposure
+            else {
+                return
             }
-        } catch {
-            print("NextLevel, setExposureModeCustom failed to lock device for configuration")
+        
+            let newISO = iso.clamped(to: device.activeFormat.minISO...device.activeFormat.maxISO)
+        
+            do {
+                try device.lockForConfiguration()
+            
+                device.setExposureModeCustom(duration: AVCaptureDevice.currentExposureDuration,
+                                             iso: newISO) { [weak device] _ in
+                    device?.unlockForConfiguration()
+                }
+            } catch {
+                print("NextLevel, setExposureModeCustom failed to lock device for configuration")
+            }
         }
     }
     
@@ -2324,6 +2339,9 @@ extension NextLevel {
                 
             } catch {
                 print("NextLevel, active device format failed to lock device for configuration")
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didFailToConfigureDevice: device, error: error)
+                }
             }
         }
     }
@@ -2354,6 +2372,7 @@ extension NextLevel {
         }
     }
     
+    // Kept for API compatibility: orientation updates are now always dispatched asynchronously.
     public func makeAbleToSyncOrientationUpdates() {
         self._isReadyForSynchronousOrientationUpdates = true
     }
@@ -2394,6 +2413,9 @@ extension NextLevel {
                 }
             } catch {
                 print("NextLevel, frame rate failed to lock device for configuration")
+                DispatchQueue.main.async {
+                    self.deviceDelegate?.nextLevel(self, didFailToConfigureDevice: device, error: error)
+                }
             }
         }
     }
@@ -2458,6 +2480,9 @@ extension NextLevel {
                         device.unlockForConfiguration()
                     } catch {
                         print("NextLevel, zoomFactor failed to lock device for configuration")
+                        DispatchQueue.main.async {
+                            self.deviceDelegate?.nextLevel(self, didFailToConfigureDevice: device, error: error)
+                        }
                     }
                 }
             }
@@ -2594,11 +2619,21 @@ extension NextLevel {
     }
     
     /// Initiates video recording, managed as a clip within the 'NextLevelSession'
-    public func record() {
-        self.executeClosureSyncOnSessionQueueIfNecessary {
-            self._recording = true
-            if let _ = self._recordingSession {
+    ///
+    /// - Parameter completionHandler: Completion handler for when the clip start has been processed on the session queue
+    public func record(withCompletionHandler completionHandler: (() -> Void)? = nil) {
+        // Set synchronously so `isRecording` is up to date for the caller; the clip starts asynchronously
+        // so the main thread never waits on a session queue that is stuck in AVFoundation.
+        self._recording = true
+
+        self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
+            // Skip if 'pause()' was called before this block ran, so no empty clip is left open.
+            if let self, self._recording, self._recordingSession != nil {
                 self.beginRecordingNewClipIfNecessary()
+            }
+
+            if let completionHandler = completionHandler {
+                DispatchQueue.main.async(execute: completionHandler)
             }
         }
     }
@@ -3323,14 +3358,9 @@ extension NextLevel {
                 }
             }
             
-            if self._isReadyForSynchronousOrientationUpdates && !self._wasBackgrounded {
-                self._sessionQueue.sync {
-                    adjustOrientation()
-                }
-            } else {
-                self._sessionQueue.async {
-                    adjustOrientation()
-                }
+            // Always async: this notification arrives on main, and a sync here hangs the app whenever the session queue is stuck in AVFoundation.
+            self._sessionQueue.async {
+                adjustOrientation()
             }
         }
     }
