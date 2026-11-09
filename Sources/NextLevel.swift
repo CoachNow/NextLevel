@@ -426,6 +426,8 @@ public class NextLevel: NSObject {
     internal var _sessionConfigurationCount: Int = 0
     
     internal var _recording: Bool = false
+    // Session queue only: whether a clip start was processed there; `_recording` is the caller's intent and can run ahead of it.
+    internal var _sessionQueueRecording: Bool = false
     internal var _recordingSession: NextLevelSession?
     internal var _lastVideoFrameTimeInterval: TimeInterval = 0
     
@@ -1438,7 +1440,7 @@ extension NextLevel {
     @discardableResult
     internal func updateVideoOrientation() ->
     (didChangeOrientation: Bool, previewLayerOrientation: AVCaptureVideoOrientation)? {
-        guard !isRecording else {
+        guard !self._sessionQueueRecording else {
             return nil
         }
         
@@ -2665,6 +2667,7 @@ extension NextLevel {
         self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
             // Skip if 'pause()' was called before this block ran, so no empty clip is left open.
             if let self, self._recording, self._recordingSession != nil {
+                self._sessionQueueRecording = true
                 self.beginRecordingNewClipIfNecessary()
             }
 
@@ -2685,6 +2688,7 @@ extension NextLevel {
                 completionHandler?()
                 return
             }
+            self._sessionQueueRecording = false
             
             if let session = self._recordingSession {
                 if self.captureMode == .movie {
@@ -2694,15 +2698,13 @@ extension NextLevel {
                     }
                 } else {
                     session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
-                        if let sessionClip = sessionClip {
-                            DispatchQueue.main.async {
-                                completionHandler?()
+                        DispatchQueue.main.async {
+                            completionHandler?()
+                            if let sessionClip = sessionClip {
                                 self.videoDelegate?.nextLevel(self, didCompleteClip: sessionClip, inSession: session)
-                            }
-                        } else if let clipError = error {
-                            DispatchQueue.main.async {
-                                completionHandler?()
-                                self.videoDelegate?.nextLevel(self, didCompleteClip: clipError, inSession: session)
+                            } else {
+                                // A clip ended before any samples finalizes to (nil, nil); report it so callers waiting for the clip are released.
+                                self.videoDelegate?.nextLevel(self, didCompleteClip: error ?? NextLevelError.notReadyToRecord, inSession: session)
                             }
                         }
                     })
@@ -2976,6 +2978,7 @@ extension NextLevel {
                 if maximumCaptureDuration.isValid && movieFileOutput.recordedDuration >= maximumCaptureDuration {
                     self._recording = false
                     self.executeClosureAsyncOnSessionQueueIfNecessary {
+                        self._sessionQueueRecording = false
                         movieFileOutput.stopRecording()
                     }
                 }
@@ -2986,6 +2989,7 @@ extension NextLevel {
                 
                 // already on session queue, adding to next cycle
                 self.executeClosureAsyncOnSessionQueueIfNecessary {
+                    self._sessionQueueRecording = false
                     session.endClip(completionHandler: { (sessionClip: NextLevelClip?, error: Error?) in
                         if let clip = sessionClip {
                             DispatchQueue.main.async {
