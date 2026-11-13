@@ -2409,6 +2409,20 @@ extension NextLevel {
         self._isReadyForSynchronousOrientationUpdates = true
     }
     
+    /// Applies the current device orientation; rotations are ignored while
+    /// `automaticallyUpdatesDeviceOrientation` is off.
+    public func syncDeviceOrientation() {
+        self._sessionQueue.async {
+            guard self.updateVideoOrientation() != nil else {
+                return
+            }
+            self.runOnMainThreadIfNeeded { [weak self] in
+                self?.updatePreviewLayerOrientationIfNeeded(shouldCallDelegate: true)
+            }
+        }
+    }
+
+    
     public
     func update(format: AVCaptureDevice.Format,
                 frameRate: CMTimeScale,
