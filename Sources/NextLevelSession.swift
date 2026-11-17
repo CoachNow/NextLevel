@@ -39,7 +39,15 @@ public class NextLevelSession {
     
     /// Output file extension for a session, see AVMediaFormat.h for supported extensions.
     public var fileExtension: String = "mp4"
-    
+
+    /// Edufii (multicam head-alignment): when set, any video/audio buffer whose presentation
+    /// timestamp is earlier than this is dropped — so the clip's writer session begins on the
+    /// first frame at or after it. Timestamp is in the capture host-time domain (same as the
+    /// sample buffers' PTS). nil = no gating (default). MUST be set before record() so it's in
+    /// place before the first buffer arrives; reads happen on the capture queue, so don't mutate
+    /// it mid-recording.
+    public var recordingStartTime: CMTime?
+
     /// Unique identifier for a session.
     public var identifier: UUID {
         get {
@@ -373,6 +381,11 @@ extension NextLevelSession {
     ///   - completionHandler: Handler when a frame appending operation completes or fails
     public func appendVideo(withSampleBuffer sampleBuffer: CMSampleBuffer, customImageBuffer: CVPixelBuffer?, minFrameDuration: CMTime, completionHandler: NextLevelSessionAppendSampleBufferCompletionHandler) {
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        // Edufii: drop frames before the agreed multicam start so the session begins on the first frame ≥ it.
+        if let start = self.recordingStartTime, timestamp < start {
+            completionHandler(false)
+            return
+        }
         self.startSessionIfNecessary(timestamp: timestamp)
         
         var frameDuration = minFrameDuration
@@ -421,6 +434,11 @@ extension NextLevelSession {
     ///   - completionHandler: Handler when a frame appending operation completes or fails
     public func appendVideo(withPixelBuffer pixelBuffer: CVPixelBuffer, customImageBuffer: CVPixelBuffer?, timestamp: TimeInterval, minFrameDuration: CMTime, completionHandler: NextLevelSessionAppendSampleBufferCompletionHandler) {
         let timestamp = CMTime(seconds: timestamp, preferredTimescale: minFrameDuration.timescale)
+        // Edufii: drop frames before the agreed multicam start (see appendVideo(withSampleBuffer:)).
+        if let start = self.recordingStartTime, timestamp < start {
+            completionHandler(false)
+            return
+        }
         self.startSessionIfNecessary(timestamp: timestamp)
         
         var frameDuration = minFrameDuration
@@ -464,6 +482,11 @@ extension NextLevelSession {
     ///   - sampleBuffer: Sample buffer input to be appended
     ///   - completionHandler: Handler when a frame appending operation completes or fails
     public func appendAudio(withSampleBuffer sampleBuffer: CMSampleBuffer, completionHandler: @escaping NextLevelSessionAppendSampleBufferCompletionHandler) {
+        // Edufii: drop pre-start audio so the session can't begin before recordingStartTime.
+        if let start = self.recordingStartTime, CMSampleBufferGetPresentationTimeStamp(sampleBuffer) < start {
+            completionHandler(false)
+            return
+        }
         self.startSessionIfNecessary(timestamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
         self._audioQueue.async {
             
