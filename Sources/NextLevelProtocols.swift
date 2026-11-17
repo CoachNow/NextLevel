@@ -107,6 +107,12 @@ public protocol NextLevelDeviceDelegate: AnyObject {
     
     // Device
     func nextLevel(_ nextLevel: NextLevel, didChangeDevice device: AVCaptureDevice)
+    func nextLevel(_ nextLevel: NextLevel, didFailToConfigureDevice device: AVCaptureDevice, error: Error)
+}
+
+extension NextLevelDeviceDelegate {
+    // Optional, called on the main queue when a device configuration change could not be applied.
+    public func nextLevel(_ nextLevel: NextLevel, didFailToConfigureDevice device: AVCaptureDevice, error: Error) {}
 }
 
 // MARK: - NextLevelFlashAndTorchDelegate
