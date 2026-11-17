@@ -413,6 +413,14 @@ public class NextLevel: NSObject {
     /// domain (same as sample-buffer PTS). nil = no gating (default). Clear it after the take.
     public var recordingStartTime: CMTime?
 
+    /// Edufii (multicam tail-alignment): ends the current clip's content at `time` (capture host time).
+    /// Call while recording; the caller still ends the clip with pause(). Cleared by the next record().
+    public func setRecordingStopTime(_ time: CMTime?) {
+        self.executeClosureAsyncOnSessionQueueIfNecessary { [weak self] in
+            self?._recordingSession?.recordingStopTime = time
+        }
+    }
+
     /// Shared Core Image rendering context.
     public var sharedCIContext: CIContext? {
         set {
@@ -2691,6 +2699,7 @@ extension NextLevel {
             if let self, self._recording, let session = self._recordingSession {
                 self._sessionQueueRecording = true
                 session.recordingStartTime = recordingStartTime  // Edufii: apply the multicam start-gate to this take
+                session.recordingStopTime = nil  // Edufii: the stop-gate belongs to one take
                 self.beginRecordingNewClipIfNecessary()
             }
 

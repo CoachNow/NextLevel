@@ -48,6 +48,12 @@ public class NextLevelSession {
     /// it mid-recording.
     public var recordingStartTime: CMTime?
 
+    /// Edufii (multicam tail-alignment): when set, any video/audio buffer whose presentation
+    /// timestamp is at or after this is dropped, so the clip's last frame is the last one before it.
+    /// Same host-time domain as `recordingStartTime`. Written on the session queue only
+    /// (NextLevel.setRecordingStopTime / record()); nil = no gating.
+    public var recordingStopTime: CMTime?
+
     /// Unique identifier for a session.
     public var identifier: UUID {
         get {
@@ -386,6 +392,10 @@ extension NextLevelSession {
             completionHandler(false)
             return
         }
+        if let stop = self.recordingStopTime, timestamp >= stop {
+            completionHandler(false)
+            return
+        }
         self.startSessionIfNecessary(timestamp: timestamp)
         
         var frameDuration = minFrameDuration
@@ -439,6 +449,10 @@ extension NextLevelSession {
             completionHandler(false)
             return
         }
+        if let stop = self.recordingStopTime, timestamp >= stop {
+            completionHandler(false)
+            return
+        }
         self.startSessionIfNecessary(timestamp: timestamp)
         
         var frameDuration = minFrameDuration
@@ -484,6 +498,10 @@ extension NextLevelSession {
     public func appendAudio(withSampleBuffer sampleBuffer: CMSampleBuffer, completionHandler: @escaping NextLevelSessionAppendSampleBufferCompletionHandler) {
         // Edufii: drop pre-start audio so the session can't begin before recordingStartTime.
         if let start = self.recordingStartTime, CMSampleBufferGetPresentationTimeStamp(sampleBuffer) < start {
+            completionHandler(false)
+            return
+        }
+        if let stop = self.recordingStopTime, CMSampleBufferGetPresentationTimeStamp(sampleBuffer) >= stop {
             completionHandler(false)
             return
         }
